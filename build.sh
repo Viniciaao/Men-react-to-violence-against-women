@@ -87,4 +87,20 @@ if [ "${1:-}" = "--verify" ]; then
     echo "   locals used : $(grep -oE '\b(0|[1-9]|[12][0-9]|3[01])@' "$IR" | sort -u -n -t@ -k1 | tr '\n' ' ')"
     echo "   gosubs      : $(grep -c '^GOSUB' "$IR")"
     echo "   returns     : $(grep -c '^RETURN' "$IR")"
+
+    # The clobber audit re-derives, from the bytecode that was just emitted,
+    # every local each subroutine can write and compares it with the
+    # "// clobbers:" comment above it - then walks the CFG to find a local that
+    # a call overwrites while the caller still needs it.  Three separate bugs of
+    # exactly that shape reached the compiled script before this existed (see
+    # docs/ANALISE.md section 6.4), one of which made the mod load and then do
+    # nothing at all, so it is part of --verify and not an optional extra.
+    if command -v python3 >/dev/null 2>&1; then
+        echo ">> auditing subroutine writes against the source comments"
+        python3 "$ROOT/tools/check-clobbers.py" "$IR" "$SRC"
+        echo ">> auditing the debug text against ScrDebug's limits"
+        python3 "$ROOT/tools/check-debug-text.py" "$SRC"
+    else
+        echo "   skipped: python3 is not available, neither audit ran"
+    fi
 fi

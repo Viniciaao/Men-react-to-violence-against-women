@@ -548,6 +548,71 @@ entregar — dois pela leitura do IR emitido, um pela leitura do próprio script
 O item 2 é o que justifica o `--verify` ser parte do fluxo e não uma checagem
 eventual: o defeito era invisível no fonte e evidente no bytecode.
 
+### 6.3ter Defeitos que o playtest revelou (e o que passou a impedir que se repitam)
+
+O build entregue para teste em jogo carregava, imprimia sua linha de debug e
+**não fazia nada**. O dump do SCRLog mostrou por quê: `NOW` (18@) valia 0 e
+`PX/PY/PZ` (20@..22@) também — ou seja, o portão de cooldown da onda via
+`0 < WAVE_COOLDOWN` todo tick e o `CONTINUE` impedia a varredura de chegar a
+executar. Nenhum ped era encontrado porque nenhum ped era procurado.
+
+Três defeitos, todos da mesma família — uma subrotina sobrescrevendo uma
+variável local que o chamador ainda usa:
+
+1. **`DebugStatus` zerava `NOW`.** A rotina calculava "quantos segundos faltam
+   de cooldown" em `NOW` (18@) e saturava o valor em 0. Ela é chamada *antes* do
+   portão da onda, que lê `NOW` como timestamp. Um texto de debug — inofensivo
+   em qualquer outra posição — desligava o mod inteiro. Corrigido usando
+   `DEFENDER` (29@) como rascunho: `DebugStatus` não escreve mais em 18@, o que
+   o IR confirma.
+2. **`IsCoward` nunca retornava.** `RETURN_TRUE` é apenas um alias de
+   `0485 IS_PC_VERSION`: ele seta o flag de comparação e **não** retorna; o
+   `RETURN` continua sendo obrigatório e não pode ficar dentro do mesmo bloco
+   `IF` (§3.7). Sem ele, cada caminho de `IsCoward` caía direto na subrotina
+   seguinte do arquivo — `RecruitDefenders`, que abria sua própria janela de
+   recrutamento com seus próprios `WAIT` e só então devolvia o controle, via
+   *seu* `RETURN`. Reescrito com um único rótulo `COWARD_YES`, um `RETURN_TRUE`
+   e um `RETURN_FALSE`, cada um seguido do seu `RETURN`
+   (`docs/COMPILER.md` §3.11).
+3. **A flag `findNext` do `0AE1` era uma variável local.** Nos dois laços de
+   varredura o quinto parâmetro do opcode era `CURSOR` (24@) — a mesma variável
+   usada como id de pedstat, tipo de ped, índice de slot e contador de `REPEAT`
+   no corpo do laço. Qualquer rejeição devolvia ao opcode um valor que ninguém
+   escolheu. Substituída por dois pontos de chamada com literais `0` e `1`:
+   constante não pode ser corrompida (`docs/COMPILER.md` §3.15).
+
+4. **Texto de debug fora dos limites do ScrDebug.** Conferindo a documentação do
+   próprio ScrDebug depois do playtest: o parâmetro de string do `0662` cabe em
+   **40 caracteres** (três literais do script tinham 41, 42 e 47) e as mensagens
+   entram numa **lista rolante de 12** na lateral da tela — não é uma linha que a
+   chamada seguinte substitui. Ou seja, o status escrito a cada tick (200 ms)
+   varria a lista em ~2,4 s e empurrava justamente os eventos ("vítima
+   detectada", "recrutado") para fora da tela. Além disso, `ReleaseAllDefenders`
+   escrevia sua linha **sem passar pelo portão** `OPT_DEBUG_TEXT`, quebrando a
+   única promessa do bloco de debug. Corrigido: literais encurtados, status com
+   throttle de 3 s derivado do timer do jogo (não há operador de módulo nem local
+   livre para guardar estado — `docs/COMPILER.md` §8.4), heartbeat quando o mod
+   está ocioso, e a linha de missão movida para dentro da rotina já throttled.
+
+É a quarta vez que a mesma classe de defeito chega a um `.cs` compilado. Ler o
+IR funcionou três vezes e falhou na quarta, então a verificação passou a ser
+mecânica:
+
+* **`tools/check-clobbers.py`** recalcula, a partir do bytecode emitido, o
+  conjunto de locais que cada subrotina pode escrever (seguindo `GOSUB`
+  aninhados) e compara com o comentário `// clobbers:` acima do rótulo; depois
+  caminha pelo grafo de fluxo a partir de cada chamada procurando um local que o
+  callee sobrescreve enquanto algum caminho ainda o lê. Roda dentro de
+  `./build.sh --verify`.
+* **`tools/check-debug-text.py`** confere os dois limites do ScrDebug nos
+  literais de debug (40 caracteres) e se nenhuma linha de debug é alcançável com
+  o `OPT_DEBUG_TEXT` desligado. Pegou o item 4 acima.
+* **`tools/selftest-clobbers.sh`** reintroduz o defeito 1 duas vezes — uma com o
+  comentário omitindo a escrita, outra com o comentário admitindo — e só passa
+  se o verificador recusar as duas. Existe porque a primeira versão do
+  verificador tratava `NOW = NOW - WAVE_TIME` como escrita pura e, com isso,
+  declarava "limpo" exatamente o bug que o originou.
+
 ### 6.4 O que continua sendo limitação
 
 * **`DEFENDER_TIMEOUT` é absoluto, não por distância.** Um defensor desiste após

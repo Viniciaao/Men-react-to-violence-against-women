@@ -298,7 +298,7 @@ gta3sc decompile bin/MOBBNOBRAVEZA.cs --config=gtasa \
 `build.sh --verify` runs this and prints the locals/gosub/return counts as a
 sanity check.
 
-### 3.11 `WHILE TRUE`, `RETURN_TRUE` and `RETURN_FALSE` exist — as aliases
+### 3.11 `WHILE TRUE`, `RETURN_TRUE` and `RETURN_FALSE` exist — as aliases, and `RETURN` is still mandatory
 
 These three names are real GTA3script, and gta3sc compiles them, but **only
 after you declare them**. They are not new opcodes: Junior_Djjr's
@@ -318,15 +318,16 @@ Two things make this work and are worth knowing:
   alternators, so `IS_PC_VERSION` keeps working in old scripts and `RETURN_TRUE`
   becomes available next to it. That is what makes the aliases addable from an
   `--add-config` file without touching `commands.xml`.
-* **They are conditions, not statements.** `RETURN_TRUE` sets the script's
-  compare flag; the `RETURN` after it hands that flag to the caller, which reads
-  it with `IF GOSUB`. This is how a boolean subroutine is written:
+* **They are conditions, not statements.** `RETURN_TRUE` compiles to
+  `IS_PC_VERSION` (0x485) and does exactly one thing: it sets the script's
+  compare flag. **It does not return.** `RETURN` (0x51) is a separate statement
+  and you still have to write it yourself.
+
+The snippet below — which an earlier revision of this very document showed as
+the way to write a boolean subroutine — compiles without a word of complaint and
+is wrong:
 
 ```
-IF GOSUB IsCoward
-    GOTO RECRUIT_NEXT_WITNESS
-ENDIF
-...
 IsCoward:
 IF <test>
     RETURN_TRUE
@@ -334,15 +335,83 @@ ENDIF
 RETURN_FALSE
 ```
 
-and it emits exactly what you would expect — `GOSUB` / `GOTO_IF_FALSE`, then
-`IS_PC_VERSION` or `IS_AUSTRALIAN_GAME` before the `RETURN`. The decompiler
-prints the *first* registered name for an ID, so `RETURN_TRUE` comes back as
-`IS_PC_VERSION` in the IR; the encoding is right either way.
+Every path that sets the flag falls through to the next instruction instead of
+going back to the caller. The emitted IR makes it plain:
 
-With `IF GOSUB` available, `-fbreak-continue` gives the full modern loop
-vocabulary: `WHILE TRUE` / `BREAK` / `CONTINUE` / `ENDWHILE`, replacing the
-`label:` + `GOTO label` idiom that the retail scripts (and the 2011 original)
-had to use.
+```
+MAIN_29:                       ; IsCoward
+ANDOR 0i8
+NOT DOES_CHAR_EXIST 29@
+GOTO_IF_FALSE %MAIN_30
+IS_PC_VERSION                  ; RETURN_TRUE ... and then nothing.  No RETURN.
+MAIN_30:                       ; the next test of the same subroutine
+```
+
+In this project the last of those fall-throughs ran out of `IsCoward` and into
+the subroutine defined next in the file, `RecruitDefenders` — which started its
+own recruitment window, complete with its own `WAIT`s, and eventually reached
+*its* `RETURN`, popping the caller's `GOSUB IsCoward`. Nothing crashed. The mod
+just did something nobody wrote (`docs/ANALISE.md` §6.3ter, item 2).
+
+**Adding the `RETURN` inside the `IF` block does not work either.** §3.7
+applies: an `IF` block has to be homogeneous, `RETURN` is a statement and not a
+condition, so
+
+```
+IF <test>
+    RETURN_TRUE
+    RETURN                     <- error: could not match alternative
+ENDIF
+```
+
+is rejected by the parser. The shape that compiles and behaves keeps one
+`RETURN_TRUE` and one `RETURN_FALSE`, each followed by its own `RETURN`, and
+reaches them with `GOTO`:
+
+```
+IF GOSUB IsCoward
+    GOTO RECRUIT_NEXT_WITNESS
+ENDIF
+...
+IsCoward:
+IF NOT <usable at all>
+    GOTO COWARD_YES
+ENDIF
+IF <cowardly pedstat>
+    GOTO COWARD_YES
+ENDIF
+IF <too afraid to act>
+    GOTO COWARD_YES
+ENDIF
+RETURN_FALSE
+RETURN                         <- mandatory, both here and below
+
+COWARD_YES:
+RETURN_TRUE
+RETURN
+```
+
+and that emits what the caller needs, with both exits terminating:
+
+```
+MAIN_37:
+IS_AUSTRALIAN_GAME             ; RETURN_FALSE
+RETURN
+MAIN_38:
+IS_PC_VERSION                  ; RETURN_TRUE
+RETURN
+```
+
+`WHILE TRUE` is the one place where no `RETURN` is involved: there the alias is
+only a condition, always true on PC. With `IF GOSUB` and `-fbreak-continue` the
+full modern loop vocabulary is available — `WHILE TRUE` / `BREAK` / `CONTINUE` /
+`ENDWHILE` — replacing the `label:` + `GOTO label` idiom the retail scripts (and
+the 2011 original) had to use.
+
+The decompiler prints the *first* name registered for an ID, so `RETURN_TRUE`
+comes back as `IS_PC_VERSION` in the IR and `RETURN_FALSE` as
+`IS_AUSTRALIAN_GAME`. The encoding is right either way; the name you see is not
+the name you wrote.
 
 ### 3.12 `REPEAT` increments the variable you give it
 
@@ -466,6 +535,54 @@ element inline instead (`IF DOES_CHAR_EXIST DEFENDER_HANDLE[ROLL]`) — but note
 that a `GOSUB` propagates the caller's argument entity into the callee's local
 (`entity type mismatch in target label`), so an array element cannot be handed
 to a subroutine parameter either.
+
+### 3.15 `0AE1`'s findNext flag: a literal, never a local
+
+`GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE` hands out one ped per call, and
+its fifth parameter says whether this call restarts the walk over the ped pool
+(`0`) or continues after the ped the previous call returned (`1`). It answers
+`-1` when the pool is exhausted.
+
+The obvious way to write that is a local you set to `0` before the loop and to
+`1` after the first hit:
+
+```
+CURSOR = 0
+SCAN_NEXT_CANDIDATE:
+GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE PX PY PZ R CURSOR FILTER CANDIDATE
+IF CANDIDATE = -1
+    GOTO RESTART_THE_WINDOW
+ENDIF
+CURSOR = 1
+```
+
+Do not. In a loop body with any scratch work at all, that local is one reused
+variable away from holding something else — a pedstat id, a ped type, a slot
+index, a `REPEAT` counter (§3.12) — when control jumps back to the label. The
+game reads the parameter as a flag, so most garbage quietly behaves like `1`;
+but a `0` in there restarts the walk and hands the same ped back forever, and
+nothing about that is visible from the source.
+
+Both ped loops in this mod therefore use two call sites, one per flag value:
+
+```
+SCAN_FIRST_CANDIDATE:
+GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE PX PY PZ VICTIM_SCAN_RADIUS 0 SEARCH_ALIVE_NPC CANDIDATE
+GOTO SCAN_GOT_CANDIDATE
+
+SCAN_NEXT_CANDIDATE:
+GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE PX PY PZ VICTIM_SCAN_RADIUS 1 SEARCH_ALIVE_NPC CANDIDATE
+
+SCAN_GOT_CANDIDATE:
+IF CANDIDATE = -1
+    CONTINUE
+ENDIF
+```
+
+One duplicated opcode and one label buy a flag that no subroutine, no `REPEAT`
+and no scratch assignment can reach, because a constant cannot be clobbered.
+Every rejection inside the body jumps to the `_NEXT_` label; only code that
+wants a fresh walk — the window loop, the next tick — enters at `_FIRST_`.
 
 ## 4. Opcode sources used to validate every command
 
@@ -853,3 +970,122 @@ Two lines per site instead of one, but every line stays readable at its call
 site and `OPT_DEBUG_TEXT` can silence all of them at once — which matters because
 somebody running ScrDebug for an unrelated reason would otherwise get this mod's
 log mixed into theirs with no way to turn it off.
+
+
+### 8.4 ScrDebug's own limits: 40 characters, and a rolling list of twelve
+
+ScrDebug's documentation fixes two numbers that decide how debug text has to be
+written:
+
+> `0662 PRINTSTRING "AAAAAAAAA"` [In] **40 character string** — This prints a
+> string on-screen. There can be a total of **12 strings printed onscreen at any
+> time**. The list of recent strings will appear at the side of the screen.
+
+and its INI has the switches behind that:
+
+| Key | Effect |
+|---|---|
+| `ShowRecentMessages` | whether `0662` and friends reach the screen at all |
+| `MaxRecentMessages` | how many of them, down the side of the screen |
+| `WriteToDebugFile` | also append them to a log file |
+
+Two consequences, neither of which the compiler will mention:
+
+* **Every literal has to fit in 40 characters.** `0662` takes a plain string
+  parameter, so gta3sc emits whatever length you wrote and the truncation
+  happens in the mod that displays it.
+  `"MenReact: victim detected, recruiting witnesses"` — 47 characters — shipped
+  in an earlier revision of this script.
+* **A message is an entry in a list, not a line that the next call replaces.**
+  An unthrottled status written every tick scrolls a twelve-entry list over in
+  about two and a half seconds, which is precisely how the messages that matter
+  ("victim detected", "recruited, defenders now 3") get pushed off the screen
+  before anybody reads them.
+
+So the periodic status line is throttled to one message per `STATUS_PERIOD`
+(3 s), while the event lines are left alone: they happen once per wave, once per
+recruit and once per release, which is the rate a reader can follow.
+
+The throttle keeps no state, because there is nowhere to keep it — no free
+local, and GTA3script has no modulo operator. It is derived from the game timer
+instead: print only while the timer sits inside the first `STATUS_WINDOW`
+milliseconds of a period.
+
+```
+GET_GAME_TIMER DEFENDER
+ROLL = DEFENDER / STATUS_PERIOD         // integer division
+ROLL = ROLL * STATUS_PERIOD
+DBG_COUNT = DEFENDER - ROLL             // DEFENDER modulo STATUS_PERIOD
+IF DBG_COUNT >= STATUS_WINDOW
+    RETURN
+ENDIF
+```
+
+Two details that cost a compile each. The destination of that subtraction has to
+be a *third* variable: gta3sc expands `A = B - C` into a copy followed by a
+subtraction and therefore rejects `A = B - A` (§3.13). And `STATUS_WINDOW` has
+to stay wider than the tick interval (`SCAN_INTERVAL`, 200 ms) or a tick can
+straddle the window and a whole period prints nothing.
+
+`tools/check-debug-text.py` audits both limits — the 40 characters, and that no
+debug call is reachable without the `OPT_DEBUG_TEXT` gate, either by sitting in
+the throttled `DebugStatus` or inside the `IF DBG_COUNT = 1` that follows a
+`GOSUB DebugGate`. `./build.sh --verify` runs it.
+
+## 9. Auditing what each subroutine really writes
+
+Sections 3.11, 3.12 and 3.15 all describe the same failure: a piece of code
+overwrites a local that somebody else still needs, the compiler says nothing,
+and the script keeps running. Four such bugs reached a compiled `.cs` in this
+project before there was any way to look for them mechanically, so
+`tools/check-clobbers.py` now does it, and `./build.sh --verify` runs it.
+
+It works on the emitted IR2, not on the source, because the source is what lies:
+
+* **A. Every subroutine's write set is recomputed from the bytecode** —
+  following nested `GOSUB`s transitively — and compared with the
+  `// clobbers:` comment above its label. A local the bytecode writes and the
+  comment does not mention is an undocumented write; the reverse is a stale
+  comment. Both are failures.
+* **B. Every call site is walked forward through the control-flow graph** to
+  find a local that the callee can overwrite while some path still reads it
+  before writing it again. That is the check that catches the historical
+  `DebugStatus`/`NOW` bug: the call writes `18@`, and 48 instructions later
+  `SUB_INT_LVAR_FROM_INT_LVAR 18@ 17@` reads it.
+
+The convention it enforces, in the comment block above each label:
+
+```
+// clobbers: NOW (18@), CURSOR (24@), ROLL (25@), DEFENDER (29@), DBG_COUNT (30@)
+// result:  NOW (18@) = a current timestamp, and that one is deliberate
+//
+// prose starts here, after a blank "//" line
+```
+
+A `// result:` line names a write the caller *wants* — an output — and exempts
+that local from check B. The blank `//` line matters: the parser reads the list
+and its indented continuations, and stops there, so prose such as "It must NOT
+touch NOW (18@)" is not mistaken for an admission that it does.
+
+Two details of the analysis are worth knowing before editing it:
+
+* **Read-modify-write instructions read their destination.**
+  `ADD_VAL_TO_INT_LVAR`, `SUB_INT_LVAR_FROM_INT_LVAR`, `MULT_*_BY_VAL`,
+  `DIV_*_BY_VAL` and the float variants all consume the old value of the first
+  parameter. Modelling them as plain writes makes the tool blind to
+  `NOW = NOW - WAVE_TIME`, which is precisely the read that the wave-cooldown
+  gate depends on: the first version of the checker classified it as a write,
+  reported the historical bug as clean, and only a deliberately re-introduced
+  copy of that bug showed it.
+* **An opcode the tool does not know is a failure, not a shrug.** Anything that
+  mentions a local without being in its table is reported, because "assume it
+  only reads" is exactly the assumption that produced four bugs.
+
+`tools/selftest-clobbers.sh` guards the guard. It rebuilds the `DebugStatus`
+writes `NOW` bug twice — once with a comment that hides it, once with a comment
+that honestly admits it — and fails unless the checker rejects both, then fails
+again unless the real source is clean. Run it after touching either tool:
+
+```
+./tools/selftest-clobbers.sh
+```

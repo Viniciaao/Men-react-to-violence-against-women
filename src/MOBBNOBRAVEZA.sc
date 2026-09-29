@@ -123,7 +123,20 @@ CONST_INT   OPT_DEBUG_TEXT          4
 
 // -- detection --------------------------------------------------------------
 CONST_INT   SCAN_INTERVAL           200     // ms between victim scans
-CONST_FLOAT VICTIM_SCAN_RADIUS      3.0     // how close to the player we look
+
+// The debug status line is throttled to one message per period.  ScrDebug keeps
+// a rolling list of the last twelve on screen, so an unthrottled line would push
+// the event messages off the screen before they could be read.  The window has
+// to stay wider than SCAN_INTERVAL or a tick could skip it; see DebugStatus.
+CONST_INT   STATUS_PERIOD           3000    // ms between two debug status lines
+CONST_INT   STATUS_WINDOW           300     // ms of the period that may print
+CONST_FLOAT VICTIM_SCAN_RADIUS      3.0     // how close to the player we look,
+                                            // with MELEE_ONLY on (see below)
+CONST_FLOAT GUNFIRE_SCAN_RADIUS     50.0    // ... and with MELEE_ONLY off: a fist
+                                            // or a bumper lands within arm's
+                                            // reach, a bullet does not.  Lower it
+                                            // if the per-tick scan ever feels
+                                            // expensive in a crowded street.
 
 // -- recruitment ------------------------------------------------------------
 CONST_FLOAT DEFEND_RADIUS           25.0    // witnesses inside this radius react
@@ -200,12 +213,16 @@ CONST_INT   SHAREDVAR_OPTIONS       3101
 //                                  cursor - it is never an index).  In the
 //                                  REPEAT loops and the slot scan it is a real
 //                                  index 0..MAX_DEFENDERS-1.  ReleaseOneDefender
-//                                  takes it in the index meaning and returns it
-//                                  clobbered, which is why both callers park it
-//                                  (section 3.12 of docs/COMPILER.md).
+//                                  takes it in the index meaning and leaves it
+//                                  alone; both callers still park it around that
+//                                  call, because the REPEAT counter is what
+//                                  section 3.12 of docs/COMPILER.md is about.
 //   25@ ROLL                       fear level, BIT_AND result, loop counter,
 //                                  then the chosen DEFENDER_HANDLE slot
-//   26@ VX    27@ VY    28@ VZ     victim position (raised to eye height)
+//   26@ VX    27@ VY    28@ VZ     victim position (raised to eye height); VX is
+//                                  the victim-scan radius while the main loop is
+//                                  looking for her, which is before RecruitDef-
+//                                  enders reads all three from her coordinates
 //   29@ DEFENDER                   witness being recruited
 //   30@ DBG_COUNT                  counter for the debug lines (defenders on the
 //                                  field, how many were just released)
@@ -251,7 +268,7 @@ SET_CLEO_SHARED_VAR SHAREDVAR_OPTIONS OPTIONS
 
 GOSUB DebugGate
 IF DBG_COUNT = 1
-    WRITE_DEBUG "MenReact: loaded, always active, no hotkey"
+    WRITE_DEBUG "MenReact loaded, always active"
 ENDIF
 
 //****************************************************************************
@@ -296,11 +313,7 @@ IF NOT DOES_CHAR_EXIST PLAYER_ACTOR
 ENDIF
 IF IS_ON_MISSION
     GOSUB ReleaseAllDefenders
-GOSUB DebugGate
-IF DBG_COUNT = 1
-        WRITE_DEBUG "MenReact: idle, a mission is running"
-    ENDIF
-    CONTINUE
+    CONTINUE                          // DebugStatus is what reports this
 ENDIF
 IF IS_ON_CUTSCENE
     GOSUB ReleaseAllDefenders
@@ -332,14 +345,32 @@ GET_GAME_TIMER NOW
 // Look for a woman the player has just hurt
 //----------------------------------------------------------------------------
 GET_CHAR_COORDINATES PLAYER_ACTOR PX PY PZ
-CURSOR = 0                          // 0AE1 findNext = 0: start a fresh search
+
+// How far to look follows the MELEE_ONLY option: a 3 m scan would silently
+// ignore every victim shot from further away, and the option would be a lie.
+// VX (26@) is dead here - RecruitDefenders is the only other user of it and
+// re-reads all three coordinates from the victim before it touches them.
+VX = VICTIM_SCAN_RADIUS
+BIT_AND OPTIONS OPT_MELEE_ONLY ROLL
+IF ROLL = 0
+    VX = GUNFIRE_SCAN_RADIUS
+ENDIF
+
+// 0AE1's fifth parameter is its "findNext" flag: 0 restarts the pool walk, 1
+// continues after the ped it just handed out.  It is a literal at two call sites
+// rather than a local, so that no scratch variable can ever corrupt it - see the
+// same note in RecruitDefenders and docs/COMPILER.md 3.15.
+SCAN_FIRST_CANDIDATE:
+GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE PX PY PZ VX 0 SEARCH_ALIVE_NPC CANDIDATE
+GOTO SCAN_GOT_CANDIDATE
 
 SCAN_NEXT_CANDIDATE:
-GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE PX PY PZ VICTIM_SCAN_RADIUS CURSOR SEARCH_ALIVE_NPC CANDIDATE
+GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE PX PY PZ VX 1 SEARCH_ALIVE_NPC CANDIDATE
+
+SCAN_GOT_CANDIDATE:
 IF CANDIDATE = -1                   // 0AE1 yields -1 when the pool is exhausted
     CONTINUE                        // nothing around: wait SCAN_INTERVAL, rescan
 ENDIF
-CURSOR = 1                          // from here on: give me the NEXT one
 
 IF CANDIDATE = PLAYER_ACTOR
     GOTO SCAN_NEXT_CANDIDATE
@@ -374,9 +405,12 @@ ENDIF
 
 // Per-victim cooldown, so the same woman cannot trigger a wave forever.
 IF CANDIDATE = LAST_VICTIM
-    NOW = NOW - LAST_VICTIM_TIME
-    IF NOW < VICTIM_COOLDOWN
-        GOTO SCAN_NEXT_CANDIDATE
+    // ROLL, not NOW: NOW has to stay a timestamp for the rest of this scan
+    // (and for the next tick), and ROLL is dead once the MELEE_ONLY block above
+    // has finished with it.
+    ROLL = NOW - LAST_VICTIM_TIME
+    IF ROLL < VICTIM_COOLDOWN
+        GOTO SCAN_NEXT_CANDIDATE     // same woman, still inside her cooldown
     ENDIF
 ENDIF
 
@@ -399,7 +433,7 @@ CLEAR_CHAR_LAST_WEAPON_DAMAGE CANDIDATE
 // already been answered.
 GOSUB DebugGate
 IF DBG_COUNT = 1
-    WRITE_DEBUG "MenReact: victim detected, recruiting witnesses"
+    WRITE_DEBUG "MenReact: victim detected, recruiting"
 ENDIF
 GOSUB RecruitDefenders
 
@@ -441,36 +475,79 @@ ENDIF
 RETURN
 
 //----------------------------------------------------------------------------
-// DebugStatus - the periodic two-line status block, once per main-loop tick.
-// clobbers: DBG_COUNT (30@), CURSOR (24@), ROLL (25@), NOW (18@), DEFENDER (29@)
+// DebugStatus - one status line, at most once per STATUS_PERIOD milliseconds.
+// clobbers: DBG_COUNT (30@), CURSOR (24@), ROLL (25@), DEFENDER (29@)
 //
-// DEFENDER is safe to borrow here: the only call site is the top of the main
-// loop, far from the recruit window, which is the only place DEFENDER means
-// something.  It is used because a GOSUB DebugGate would overwrite DBG_COUNT,
-// which at that point still holds the number of defenders to print.
+// It must NOT touch NOW (18@), and that is not a stylistic preference: this
+// routine is called before the wave-cooldown gate in the main loop, and an
+// earlier version computed "seconds left" in NOW and clamped it to zero - which
+// left the gate reading NOW = 0, so "0 < 8000" was always true and the script
+// CONTINUEd every single tick without ever scanning for a victim.  The mod
+// looked loaded and did nothing at all.  The scratch is DEFENDER instead, which
+// is dead here (the only call site is the top of the main loop, far from the
+// recruit window that is the only place DEFENDER means something).
+//
+// The line chosen is the first that applies: defenders on the field, then "a
+// mission is running", then the wave cooldown, then a heartbeat that says the
+// script is alive and watching.  The heartbeat exists because of that bug - a
+// silent screen cannot be told apart from a script that never loaded.
+//
+// ScrDebug draws 0662/0663/0664 as a rolling list of the last twelve messages
+// down the side of the screen (its INI: ShowRecentMessages, MaxRecentMessages,
+// WriteToDebugFile), and its string parameter is 40 characters.  Both facts are
+// why this routine is throttled and why every literal here is short: at five
+// ticks per second an unthrottled status would scroll the event lines - victim
+// found, defender recruited - off the screen before they could be read.
 //----------------------------------------------------------------------------
 DebugStatus:
 BIT_AND OPTIONS OPT_DEBUG_TEXT ROLL
 IF ROLL = 0
     RETURN
 ENDIF
+
+// The throttle.  GTA3script has no modulo operator and no free local to remember
+// the last print in, so it is derived from the timer instead: print only while
+// the timer sits inside the first STATUS_WINDOW milliseconds of a period.  The
+// window is wider than SCAN_INTERVAL, so no period can be skipped by a tick.
+// The remainder goes into DBG_COUNT and not into ROLL because gta3sc rejects
+// "VAR1 = THING - VAR1" (docs/COMPILER.md 3.13): it has to expand the form into
+// a copy followed by a subtraction, and the copy would already have destroyed
+// the subtrahend.  DBG_COUNT is zeroed again two lines below.
+GET_GAME_TIMER DEFENDER
+ROLL = DEFENDER / STATUS_PERIOD
+ROLL = ROLL * STATUS_PERIOD
+DBG_COUNT = DEFENDER - ROLL             // DEFENDER modulo STATUS_PERIOD
+IF DBG_COUNT >= STATUS_WINDOW
+    RETURN
+ENDIF
+
 DBG_COUNT = 0
 REPEAT MAX_DEFENDERS CURSOR
     IF DEFENDER_HANDLE[CURSOR] > SLOT_EMPTY
         DBG_COUNT = DBG_COUNT + 1
     ENDIF
 ENDREPEAT
-WRITE_DEBUG_WITH_INT "MenReact defenders" DBG_COUNT
-
-GET_GAME_TIMER NOW
-NOW = NOW - WAVE_TIME               // age of the current cooldown
-NOW *= -1                           // gta3sc rejects "VAR = CONST - VAR" (and
-NOW = NOW + WAVE_COOLDOWN           // "VAR = 0 - VAR"), so negate with *= first
-IF NOW < 0
-    NOW = 0
+IF DBG_COUNT > 0
+    WRITE_DEBUG_WITH_INT "MenReact defenders" DBG_COUNT
+    RETURN
 ENDIF
-DEFENDER = NOW / MS_PER_SECOND      // report it in seconds, not milliseconds
-WRITE_DEBUG_WITH_INT "MenReact cooldown left s" DEFENDER
+
+IF IS_ON_MISSION
+    WRITE_DEBUG "MenReact idle: a mission is running"
+    RETURN
+ENDIF
+
+// DEFENDER still holds the raw timer from the throttle above.
+ROLL = DEFENDER - WAVE_TIME             // how long ago the last wave started
+ROLL *= -1                              // gta3sc rejects "VAR = CONST - VAR" (3.13)
+ROLL = ROLL + WAVE_COOLDOWN
+IF ROLL > 0
+    ROLL = ROLL / MS_PER_SECOND
+    WRITE_DEBUG_WITH_INT "MenReact cooldown left s" ROLL
+    RETURN
+ENDIF
+
+WRITE_DEBUG "MenReact watching for a victim"
 RETURN
 
 //----------------------------------------------------------------------------
@@ -495,7 +572,7 @@ RETURN
 //----------------------------------------------------------------------------
 IsCoward:
 IF NOT DOES_CHAR_EXIST DEFENDER
-    RETURN_TRUE                     // unusable, so treat him as "leave alone"
+    GOTO COWARD_YES                 // unusable, so treat him as "leave alone"
 ENDIF
 
 // 1) GET_CHAR_STAT_ID: the ped's row in data/pedstats.dat (0-based).  The last
@@ -519,23 +596,23 @@ ENDIF
 GET_CHAR_STAT_ID DEFENDER CURSOR
 IF CURSOR >= PEDSTAT_STREET_GUY
     IF CURSOR <= PEDSTAT_TOUGH_GIRL
-        RETURN_TRUE
+        GOTO COWARD_YES
     ENDIF
 ENDIF
 IF CURSOR = PEDSTAT_STEWARD
-    RETURN_TRUE
+    GOTO COWARD_YES
 ENDIF
 IF CURSOR = PEDSTAT_SHOPPER
-    RETURN_TRUE
+    GOTO COWARD_YES
 ENDIF
 IF CURSOR = PEDSTAT_OLDSHOPPER
-    RETURN_TRUE
+    GOTO COWARD_YES
 ENDIF
 IF CURSOR = PEDSTAT_SKATER
-    RETURN_TRUE
+    GOTO COWARD_YES
 ENDIF
 IF CURSOR = PEDSTAT_COWARD
-    RETURN_TRUE
+    GOTO COWARD_YES
 ENDIF
 
 // 2) GET_CHAR_FEAR: the Fear column of the same file (0..100, 100 = scared of
@@ -546,10 +623,15 @@ ENDIF
 //    and keep only the pedstat blacklist.
 GET_CHAR_FEAR DEFENDER ROLL
 IF ROLL > MAX_FEAR
-    RETURN_TRUE
+    GOTO COWARD_YES
 ENDIF
 
 RETURN_FALSE
+RETURN                              // mandatory - see the note above the label
+
+COWARD_YES:
+RETURN_TRUE
+RETURN
 
 //----------------------------------------------------------------------------
 // RecruitDefenders - for RECRUIT_WINDOW milliseconds, walk the ped pool around
@@ -557,7 +639,8 @@ RETURN_FALSE
 // filter.  Whoever fails a filter is not modified in any way: the game keeps
 // controlling him normally.
 // in:      CANDIDATE (23@) = the victim, PLAYER_ACTOR (14@)
-// clobbers: everything from 18@ and 20@ up
+// clobbers: NOW (18@), PX PY PZ (20@ 21@ 22@), CURSOR (24@), ROLL (25@),
+//           VX VY VZ (26@ 27@ 28@), DEFENDER (29@), DBG_COUNT (30@)
 //
 // The filters run cheapest first on purpose.  Distance and line of sight throw
 // away most of a crowded street for one opcode each, before anything reads a
@@ -594,14 +677,23 @@ ENDIF
 GET_CHAR_COORDINATES CANDIDATE VX VY VZ
 VZ = VZ + EYE_HEIGHT
 
-CURSOR = 0                          // 0AE1 findNext = 0: start a fresh search
+// The fifth parameter of 0AE1 is its "findNext" flag: 0 walks the ped pool from
+// the beginning, 1 continues after the ped it handed out last time.  It is
+// written as a literal at two call sites rather than kept in a local, because
+// every scratch local in this subroutine doubles for something else and one
+// stray write to that flag would silently restart - or stall - the walk.  A
+// constant cannot be clobbered.  This is the same lesson as NOW and DebugStatus.
+RECRUIT_FIRST_WITNESS:
+GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE VX VY VZ DEFEND_RADIUS 0 SEARCH_ALIVE_NPC DEFENDER
+GOTO RECRUIT_GOT_WITNESS
 
 RECRUIT_NEXT_WITNESS:
-GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE VX VY VZ DEFEND_RADIUS CURSOR SEARCH_ALIVE_NPC DEFENDER
+GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE VX VY VZ DEFEND_RADIUS 1 SEARCH_ALIVE_NPC DEFENDER
+
+RECRUIT_GOT_WITNESS:
 IF DEFENDER = -1                    // 0AE1 yields -1 when the pool is exhausted
     GOTO RECRUIT_WINDOW_LOOP        // ... so the whole 2.5 s window retries
 ENDIF
-CURSOR = 1                          // from here on: give me the NEXT one
 
 // --- usable at all? --------------------------------------------------------
 IF DEFENDER = PLAYER_ACTOR
@@ -716,8 +808,8 @@ REPEAT MAX_DEFENDERS ROLL
 ENDREPEAT
 IF NOT CURSOR > NO_SLOT
     GOSUB DebugGate
-IF DBG_COUNT = 1
-        WRITE_DEBUG "MenReact: mob is full, witness left alone"
+    IF DBG_COUNT = 1
+        WRITE_DEBUG "MenReact: mob full, witness left alone"
     ENDIF
     GOTO RECRUIT_NEXT_WITNESS       // the mob is already big enough
 ENDIF
@@ -772,9 +864,12 @@ GOTO RECRUIT_WINDOW_LOOP
 
 //----------------------------------------------------------------------------
 // ReleaseExpiredDefenders - drop whoever has given up.
-// clobbers: NOW (18@), CURSOR (24@), ROLL (25@), DBG_COUNT (30@)
-// NOW is used as the parking place for the REPEAT counter, so it does not
-// survive the loop even though it was read once at the top.
+// clobbers: NOW (18@), CURSOR (24@), ROLL (25@), DEFENDER (29@), DBG_COUNT (30@)
+// result:  NOW (18@) = a current timestamp, and that one is deliberate
+//
+// NOW is left holding a current timestamp either way - untouched on the fast
+// path, re-read at the top of the loop otherwise - because the main loop uses it
+// for the wave cooldown as soon as this returns.
 //----------------------------------------------------------------------------
 ReleaseExpiredDefenders:
 // Fast path.  DEFENDER_HANDLE[0] is local 4@: gta3sc allocates locals in
@@ -794,11 +889,12 @@ REPEAT MAX_DEFENDERS CURSOR
             // CURSOR is the REPEAT counter AND the slot ReleaseOneDefender reads,
             // and gta3sc compiles REPEAT as "increment the variable itself" - so
             // the counter has to be parked and put back around the call.  See
-            // docs/COMPILER.md 3.12.  NOW is free here: it holds the timestamp
-            // this routine read once at the top and does not need again.
-            NOW = CURSOR
+            // docs/COMPILER.md 3.12.  The parking place is DEFENDER, not NOW:
+            // NOW has to leave this routine still holding a timestamp, because
+            // the main loop reads it right afterwards for the wave cooldown.
+            DEFENDER = CURSOR
             GOSUB ReleaseOneDefender        // reads DEFENDER_HANDLE[CURSOR]
-            CURSOR = NOW
+            CURSOR = DEFENDER
             DEFENDER_HANDLE[CURSOR] = SLOT_EMPTY
             GOSUB DebugGate
             IF DBG_COUNT = 1
@@ -812,7 +908,9 @@ RETURN
 //----------------------------------------------------------------------------
 // ReleaseAllDefenders - the player died, got busted, hopped into a car, or a
 // mission or a cutscene started: everybody minds their own business again.
-// clobbers: CURSOR (24@), ROLL (25@), DBG_COUNT (30@)
+// clobbers: CURSOR (24@), ROLL (25@), DEFENDER (29@), DBG_COUNT (30@)
+// DEFENDER is only a parking space for the REPEAT counter (see below); every
+// caller invokes this at a point where DEFENDER (29@) is dead.
 //----------------------------------------------------------------------------
 ReleaseAllDefenders:
 IF DEFENDER_HANDLE[0] = SLOT_EMPTY
@@ -829,15 +927,23 @@ REPEAT MAX_DEFENDERS CURSOR
     ENDIF
 ENDREPEAT
 IF DBG_COUNT > 0
-    WRITE_DEBUG_WITH_INT "MenReact released defenders" DBG_COUNT
+    // DebugGate answers in DBG_COUNT and keeps its scratch in ROLL, so the
+    // count is parked in CURSOR first: the REPEAT is over and nothing reads it
+    // again.  Without the gate this line reached the screen even with
+    // OPT_DEBUG_TEXT off, which is the one promise the debug block makes.
+    CURSOR = DBG_COUNT
+    GOSUB DebugGate
+    IF DBG_COUNT = 1
+        WRITE_DEBUG_WITH_INT "MenReact released defenders" CURSOR
+    ENDIF
 ENDIF
 RETURN
 
 //----------------------------------------------------------------------------
 // ReleaseOneDefender - put the defender in DEFENDER_HANDLE[CURSOR] back to being
 // a normal pedestrian.
-// in:      CURSOR (24@) = the slot to release
-// clobbers: CURSOR (24@), ROLL (25@)
+// in:      CURSOR (24@) = the slot to release (read, never written)
+// clobbers: ROLL (25@)
 //
 // It reads its slot inline rather than taking a handle in DEFENDER (29@).  That
 // is what makes the recruit loop able to free an expired slot while DEFENDER is
@@ -845,13 +951,16 @@ RETURN
 // for a handle anywhere in this script, and a FLOAT one cannot hold an int in
 // gta3sc.
 //
-// The contract with the caller is the subtle part.  CURSOR arrives holding the
-// slot index and LEAVES holding the kill target, because gta3sc compiles
-// "REPEAT n CURSOR" into "increment CURSOR itself" - a subroutine that quietly
-// rewrites the counter makes the loop end after one pass, and the emitted
-// bytecode shows it (ADD_VAL_TO_INT_LVAR on the counter variable).  Both callers
-// therefore park CURSOR before the call and restore it after.  The kill target
-// itself goes into ROLL so that the slot index is at least not needed twice.
+// CURSOR is deliberately left untouched, because both callers run it as a REPEAT
+// counter and gta3sc compiles "REPEAT n CURSOR" into "increment CURSOR itself" -
+// a subroutine that quietly rewrote the counter would end the loop after one
+// pass, and the emitted bytecode shows exactly that (ADD_VAL_TO_INT_LVAR on the
+// counter variable).  The kill target therefore goes into ROLL.  The callers
+// still park and restore CURSOR around the call; with this routine writing only
+// ROLL that is belt and braces, and it stays that way on purpose, because the
+// day someone teaches this routine to take its slot in DEFENDER is the day the
+// loops break again.  tools/check-clobbers.py re-derives the write set from the
+// emitted IR2 and fails the build if the two ever disagree.
 //
 // The task is only taken away from a ped that is still holding *our* task, which
 // GET_CHAR_KILL_TARGET_CHAR answers exactly: CLEO+ reads the target pointer out

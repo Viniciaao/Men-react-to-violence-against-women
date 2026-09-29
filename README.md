@@ -105,7 +105,10 @@ edite e recompile com `./build.sh`.
 |---|---|---|
 | `OPTIONS_DEFAULT` | `7` | Campo de bits das features opcionais (veja abaixo) |
 | `SCAN_INTERVAL` | `200` ms | Período do `WHILE TRUE` do laço principal |
-| `VICTIM_SCAN_RADIUS` | `3.0` m | Raio em que se procura uma mulher agredida |
+| `VICTIM_SCAN_RADIUS` | `3.0` m | Raio da procura com `MELEE_ONLY` **ligado** |
+| `GUNFIRE_SCAN_RADIUS` | `50.0` m | …e com `MELEE_ONLY` **desligado**: soco e parachoque conectam de perto, tiro não |
+| `STATUS_PERIOD` | `3000` ms | Intervalo entre duas linhas de *status* do debug |
+| `STATUS_WINDOW` | `300` ms | Precisa continuar acima de `SCAN_INTERVAL` (veja §8.4 do COMPILER) |
 | `DEFEND_RADIUS` | `25.0` m | Raio em que as testemunhas reagem (3D) |
 | `MAX_DEFENDERS` | `5` | **Teto** de defensores simultâneos (o original não tinha) |
 | `RECRUIT_WINDOW` | `2500` ms | Por quanto tempo se procura testemunhas |
@@ -122,7 +125,7 @@ Bits de `OPTIONS_DEFAULT` (some os valores e coloque o total):
 | Bit | Feature |
 |---|---|
 | `1` | `IGNORE_WHEN_IN_CAR` — não age enquanto o jogador dirige |
-| `2` | `MELEE_ONLY` — ignora tiros/explosões, só socos e atropelamento |
+| `2` | `MELEE_ONLY` — ignora tiros/explosões, só socos e atropelamento. Também decide o raio da procura: desligado, usa `GUNFIRE_SCAN_RADIUS` |
 | `4` | `DEBUG_TEXT` — escreve as linhas de depuração (só visíveis com ScrDebug) |
 
 > O gta3sc não tem *constant folding*: não dá para escrever `IF CONST = 1`
@@ -135,9 +138,19 @@ Bits de `OPTIONS_DEFAULT` (some os valores e coloque o total):
 
 ```bash
 ./build.sh              # -> bin/MOBBNOBRAVEZA.cs
-./build.sh --verify     # + desmonta o resultado em build/MOBBNOBRAVEZA.ir2.txt
+./build.sh --verify     # + desmonta o resultado e audita as subrotinas
 ./build.sh --rebuild-tools
+./tools/selftest-clobbers.sh   # testa o próprio auditor
 ```
+
+O `--verify` desmonta o `.cs` em `build/MOBBNOBRAVEZA.ir2.txt` e roda
+`tools/check-clobbers.py`, que recalcula do bytecode o conjunto de variáveis
+locais que cada subrotina escreve, compara com o comentário `// clobbers:` do
+fonte e ainda procura, no grafo de fluxo, um local que uma chamada sobrescreve
+enquanto o chamador precisa dele. Quatro defeitos dessa família chegaram a um
+`.cs` compilado antes de o auditor existir — um deles fazia o mod carregar e não
+reagir a nada — então ele é parte do build e não uma checagem opcional
+(`docs/COMPILER.md` §9, `docs/ANALISE.md` §6.3ter).
 
 O `build.sh` procura o compilador em `$GTA3SC`, depois em
 `tools/gta3sc/build/gta3sc`, depois no `PATH`; se não achar, ele clona e
@@ -216,6 +229,8 @@ docs/ANALISE.md          auditoria do mod original de 2011 + o que mudou
 docs/COMPILER.md         como o gta3sc foi construído e as pegadinhas da linguagem
 docs/original-mod-2011.txt  listagem do mod original, para referência
 tools/build-gta3sc.sh    build do compilador sem CMake
+tools/check-clobbers.py  auditor de subrotinas (roda no ./build.sh --verify)
+tools/selftest-clobbers.sh  reintroduz os bugs históricos e exige que o auditor os pegue
 tools/sbl.py             consulta a Sanny Builder Library (sa.json) por opcode
 tools/gta3sc/            clone do compilador       (ignorado pelo git)
 tools/sbl/               clone da Sanny Builder Library (ignorado pelo git)
@@ -276,18 +291,32 @@ As linhas (o gta3sc **caixa-alta** literais de string, então é assim que elas
 aparecem):
 
 ```
-MENREACT: LOADED, ALWAYS ACTIVE, NO HOTKEY     <- uma vez, no boot
-MENREACT DEFENDERS: 2                          <- a cada 200 ms
-MENREACT COOLDOWN LEFT S: 5                    <- a cada 200 ms
-MENREACT: IDLE, A MISSION IS RUNNING
-MENREACT: VICTIM DETECTED, RECRUITING WITNESSES
-MENREACT: MOB IS FULL, WITNESS LEFT ALONE
-MENREACT RECRUITED, DEFENDERS NOW: 3
-MENREACT: DEFENDER TIMED OUT, RELEASED
-MENREACT RELEASED DEFENDERS: 3
+MENREACT LOADED, ALWAYS ACTIVE                 <- uma vez, no boot
+MENREACT WATCHING FOR A VICTIM                 <- heartbeat: mod vivo e ocioso
+MENREACT DEFENDERS: 2                          <- estado periódico
+MENREACT COOLDOWN LEFT S: 5                    <- estado periódico
+MENREACT IDLE: A MISSION IS RUNNING            <- estado periódico
+MENREACT: VICTIM DETECTED, RECRUITING          <- evento
+MENREACT RECRUITED, DEFENDERS NOW: 3           <- evento
+MENREACT: MOB FULL, WITNESS LEFT ALONE         <- evento
+MENREACT: DEFENDER TIMED OUT, RELEASED         <- evento
+MENREACT RELEASED DEFENDERS: 3                 <- evento
 ```
 
-Duas coisas que a implementação impõe e que valem saber antes de editar:
+O **estado periódico** sai no máximo uma vez a cada `STATUS_PERIOD` (3 s): o
+ScrDebug mostra uma **lista rolante com as últimas 12 mensagens** na lateral da
+tela, e uma linha por tick (200 ms) empurraria os **eventos** — que são o que
+interessa — para fora da tela antes de dar tempo de ler. O heartbeat existe por
+causa do defeito que o teste em jogo revelou: tela silenciosa não se distingue
+de "o script nem carregou" (`docs/ANALISE.md` §6.3ter).
+
+Quatro coisas que a implementação impõe e que valem saber antes de editar:
+
+* **A string cabe em 40 caracteres.** É o limite do parâmetro do `0662` no
+  ScrDebug, e o compilador não avisa: ele emite o literal do tamanho que estiver
+  no fonte. `tools/check-debug-text.py` confere isso (e confere também se alguma
+  linha de debug escapou do portão `OPT_DEBUG_TEXT`), e roda no
+  `./build.sh --verify`.
 
 * **A string do `WRITE_DEBUG_WITH_INT` é um rótulo, não um formato.** O CLEO5 faz
   `ss << text << ": " << value`, então `"MenReact defenders" 3` sai
@@ -300,7 +329,7 @@ Duas coisas que a implementação impõe e que valem saber antes de editar:
 ```
 GOSUB DebugGate
 IF DBG_COUNT = 1
-    WRITE_DEBUG "MenReact: victim detected, recruiting witnesses"
+    WRITE_DEBUG "MenReact: victim detected, recruiting"
 ENDIF
 ```
 
