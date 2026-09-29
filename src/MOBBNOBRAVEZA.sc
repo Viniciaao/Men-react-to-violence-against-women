@@ -11,15 +11,21 @@
 //*        left exactly as the game left them (no flee task, no turn, nothing).
 //*      - a pedestrian that would not act against the player is NEVER touched
 //*        either.  Cowards, peds already fighting, peds owned by the game or
-//*        by another script: the mod does not read them, does not give them a
-//*        task, does not change their stats and does not change their brain.
-//*        The game keeps controlling them normally.
+//*        by another script: the mod does not give them a task, does not change
+//*        their stats and does not change their brain.  The game keeps
+//*        controlling them normally.
 //*      - the only task this script ever gives anybody is
 //*        TASK_KILL_CHAR_ON_FOOT against the player, and it is taken back
 //*        (CLEAR_CHAR_TASKS_IMMEDIATELY) only from the peds that still have
 //*        that exact task, when their time is up or the situation ends.
 //*
-//*  No text is ever printed on screen.  No message, no help box, no GXT.
+//*  The mod is ALWAYS ACTIVE.  There is no hotkey and no key handling of any
+//*  kind: nothing is read from the keyboard, so nothing can conflict with the
+//*  game, with another mod or with ScrDebug's own keys.  The on/off state is
+//*  still published in CLEO shared variable 3100 for other mods to read.
+//*
+//*  The only text this script writes is DEBUG text (0662/0663), which the
+//*  retail game ignores completely.  See the DEBUG OUTPUT section below.
 //*
 //*  This is a from-scratch rewrite of the 2011 CLEO mod "Nao bata em mulheres"
 //*  by Izerli (MixMods, "v2" page).  docs/ANALISE.md contains the line-by-line
@@ -34,35 +40,64 @@
 //*  coward, which vanilla CLEO simply cannot ask.  Without CLEO+ the script
 //*  stops loading at the first unknown opcode.
 //*
-//*  Base opcodes (vanilla CLEO):
+//*  Base opcodes (vanilla SA, no extension needed):
 //*      0AE1 GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE
 //*      0AB3 SET_CLEO_SHARED_VAR    0B10 BIT_AND
+//*      0662 WRITE_DEBUG            0663 WRITE_DEBUG_WITH_INT
+//*      0485 IS_PC_VERSION, aliased to TRUE / RETURN_TRUE
+//*      059A IS_AUSTRALIAN_GAME, aliased to RETURN_FALSE
 //*  CLEO+ opcodes:
 //*      0E1D IS_ON_MISSION              0E25 IS_ON_CUTSCENE
-//*      0EB7 IS_ON_SCRIPTED_CUTSCENE    0E3D IS_KEY_JUST_PRESSED
-//*      0E0A IS_CHAR_SCRIPT_CONTROLLED  0E47 IS_CHAR_FIGHTING
-//*      0EFA GET_CHAR_FEAR              0EB1 GET_CHAR_STAT_ID
-//*      0E44 GET_CHAR_KILL_TARGET_CHAR  0EE4 LOCATE_CHAR_DISTANCE_TO_CHAR
-//*  They are declared for the compiler in config/cleoplus.xml, because the
-//*  cleo.xml that ships with gta3sc stops at 0xB16.  That file is a verified
+//*      0EB7 IS_ON_SCRIPTED_CUTSCENE    0E0A IS_CHAR_SCRIPT_CONTROLLED
+//*      0E47 IS_CHAR_FIGHTING           0EFA GET_CHAR_FEAR
+//*      0EB1 GET_CHAR_STAT_ID           0E44 GET_CHAR_KILL_TARGET_CHAR
+//*      0EE4 LOCATE_CHAR_DISTANCE_TO_CHAR
+//*  The CLEO+ ones are declared for the compiler in config/cleoplus.xml because
+//*  the cleo.xml that ships with gta3sc stops at 0xB16.  That file is a verified
 //*  excerpt of the gta3sc definition CLEO+ itself publishes - the official one
 //*  cannot simply be added on top of gta3sc's config, see docs/COMPILER.md 5.1.
 //*
 //*  Install: copy bin/MOBBNOBRAVEZA.CS into the CLEO folder.
 //*
+//*  DEBUG OUTPUT
+//*  ------------
+//*  WRITE_DEBUG and friends are Rockstar's own script-debugging opcodes, left in
+//*  the retail game as no-ops.  Two mods re-activate them, and with either one
+//*  installed this script's debug lines appear on screen:
+//*
+//*      ScrDebug (Deji)     https://www.mixmods.com.br/2017/06/sa-scrdebug/
+//*      CLEO5 + DebugUtils  set DebugUtils.General.LegacyDebugOpcodes = 1
+//*
+//*  Without one of them the opcodes cost a parameter skip and nothing else: no
+//*  text, no log, no gameplay difference.  That is exactly why the 2011 original
+//*  could ship its "write_debug" credit line to end users, and why this script
+//*  can afford to be chatty.
+//*
+//*  What gets written:
+//*      - one line at boot, so an installed mod is visible as installed;
+//*      - one status block every SCAN_INTERVAL while the game is playable
+//*        (defenders on the field, seconds left on the wave cooldown);
+//*      - one line per event: victim detected, man recruited, man turned down
+//*        because the mob is full, a defender timing out, and the whole mob
+//*        being released (with how many were released).
+//*
+//*  Two formatting notes, both from how the opcodes are actually implemented
+//*  (CLEO5's DebugUtils, which follows Rockstar's original):
+//*      WRITE_DEBUG        "text"          ->  text
+//*      WRITE_DEBUG_WITH_INT  "Label" 5    ->  Label: 5
+//*  So the string of the _WITH_INT form is a LABEL, not a format string - there
+//*  is no %d to write, and the ": " separator is added by the game side.
+//*
 //*  BUILDING (thelink2012/gta3sc on Linux or Windows)
 //*  -------------------------------------------------
-//*      gta3sc src/MOBBNOBRAVEZA.sc --config=gtasa --guesser --cs \
-//*             --add-config=config/cleoplus.xml -fbreak-continue \
-//*             -o bin/MOBBNOBRAVEZA.cs
-//*  or simply run ./build.sh from the repository root.
-//*
-//*  IN GAME
-//*  -------
-//*  F10 toggles the mod on and off, silently.  The current state is published
-//*  in CLEO shared variable 3100 (1 = on, 0 = off) and the active options in
-//*  3101, so other mods and a save-game-friendly tool can read it.  Everything
-//*  tunable is in the CONST block below: edit it and recompile.
+//*      gta3sc src/MOBBNOBRAVEZA.sc --config=gtasa \
+//*             --add-config=config/cleoplus.xml --guesser --cs \
+//*             -fbreak-continue -fno-entity-tracking -o bin/MOBBNOBRAVEZA.cs
+//*  or simply run ./build.sh from the repository root.  -fno-entity-tracking is
+//*  needed because gta3sc's entity checker loses the type of a variable that is
+//*  fed from an array element, and DEFENDER_HANDLE[5] is a table of ped handles
+//*  (docs/COMPILER.md, section 3.14).  It is a compile-time check only: the
+//*  bytecode is the same with or without it.
 //*
 //****************************************************************************
 
@@ -78,13 +113,13 @@ SCRIPT_START
 //
 //      1 = IGNORE_WHEN_IN_CAR  do nothing while the player is driving
 //      2 = MELEE_ONLY          ignore gunfire / explosions, melee and cars only
+//      4 = DEBUG_TEXT          write the debug lines described in the header
 //
-//  1 + 2 = 3 (the default: both on)
-CONST_INT   OPTIONS_DEFAULT         3
+//  1 + 2 + 4 = 7 (the default: everything on)
+CONST_INT   OPTIONS_DEFAULT         7
 CONST_INT   OPT_IGNORE_WHEN_IN_CAR  1
 CONST_INT   OPT_MELEE_ONLY          2
-
-CONST_INT   ENABLED_ON_START        1
+CONST_INT   OPT_DEBUG_TEXT          4
 
 // -- detection --------------------------------------------------------------
 CONST_INT   SCAN_INTERVAL           200     // ms between victim scans
@@ -110,25 +145,16 @@ CONST_INT   DEFENDER_TIMEOUT        45000   // ms before a defender gives up
 // TOURIST only, and the pedstat blacklist below does the real coward work.
 CONST_INT   MAX_FEAR                70
 
-// GET_CHAR_STAT_ID (CLEO+) returns the ped's row in data/pedstats.dat,
-// 0-based.  The last column of that file is "Default decision maker", and the
-// game's own header documents the value 4 as "coward peds" - the peds the
-// R_Weak decision maker sends running.  Exactly nine rows carry it:
-//      16 SENSIBLE_GUY  17 GEEK_GUY  22 SENSIBLE_GIRL  23 GEEK_GIRL
-//      34 STEWARD       36 SHOPPER   37 OLDSHOPPER     40 SKATER
-//      42 COWARD
-// Seven of those are male: 16, 17, 34, 36, 37, 40 and 42.  (The female half
-// never reaches the test - IS_CHAR_MALE rejected it long before.)
-//
-// The names below come from the PEDSTAT enum that CLEO+ itself publishes for
-// gta3sc and that config/cleoplus.xml includes verbatim, so they are the
-// authority for the numbers; declaring them again here would fail with "user
-// constant exists already as a string constant".  The full vanilla table, with
-// the Fear value of each row, is in docs/ANALISE.md section 5.2.
+// The coward blacklist itself uses the PEDSTAT_* names of the enum that CLEO+
+// publishes for gta3sc and that config/cleoplus.xml includes verbatim, so the
+// numbers are sourced rather than hand-derived.  They are listed, with the
+// reasoning, right where the test is performed (see IsCoward below) and in
+// docs/ANALISE.md section 5.2.
 
 // -- rate limiting ----------------------------------------------------------
 CONST_INT   WAVE_COOLDOWN           8000    // ms between two reactions (global)
 CONST_INT   VICTIM_COOLDOWN         25000   // ms before the same woman re-triggers
+CONST_INT   MS_PER_SECOND           1000    // only to report the cooldown in s
 
 // -- geometry / misc --------------------------------------------------------
 CONST_FLOAT EYE_HEIGHT              0.7     // raises the LOS ray off the ground
@@ -160,21 +186,33 @@ CONST_INT   SHAREDVAR_OPTIONS       3101
 //   15@       LAST_VICTIM         last woman we reacted to (-1 = none yet)
 //   16@       LAST_VICTIM_TIME    when we reacted to her
 //   17@       WAVE_TIME           timestamp of the last reaction (global)
-//   18@       ENABLED             runtime on/off (F10)
-//   19@       NOW                 cached game timer
-//   20@       LAST_SCAN           when the victim scan last ran
-//   21@       OPTIONS             bit field of enabled optional features
+//   18@       NOW                 cached game timer
+//   19@       OPTIONS             bit field of enabled optional features
 //
 //  scratch (free to clobber anywhere) -------------------------------------
-//   22@ PX    23@ PY    24@ PZ     player position / LOS ray start point
-//   25@ CANDIDATE                  ped being inspected by the scan loop
-//   26@ CURSOR                     0AE1 cursor, then ped type, pedstat row,
-//                                  slot index, kill target, loop counter
-//   27@ ROLL                       fear level, BIT_AND result, loop counter,
+//   20@ PX    21@ PY    22@ PZ     player position / LOS ray start point
+//   23@ CANDIDATE                  ped being inspected by the scan loop
+//   24@ CURSOR                     two unrelated jobs, and the name only fits
+//                                  the second one.  In the 0AE1 scan loops it is
+//                                  the FIND-NEXT FLAG: 0 starts a fresh search,
+//                                  1 continues past the ped just returned (SBL
+//                                  calls the parameter findNext:bool, not a
+//                                  cursor - it is never an index).  In the
+//                                  REPEAT loops and the slot scan it is a real
+//                                  index 0..MAX_DEFENDERS-1.  ReleaseOneDefender
+//                                  takes it in the index meaning and returns it
+//                                  clobbered, which is why both callers park it
+//                                  (section 3.12 of docs/COMPILER.md).
+//   25@ ROLL                       fear level, BIT_AND result, loop counter,
 //                                  then the chosen DEFENDER_HANDLE slot
-//   28@ VX    29@ VY    30@ VZ     victim position (raised to eye height)
-//   31@ DEFENDER                   witness being recruited, or defender being
-//                                  released (never both at the same time)
+//   26@ VX    27@ VY    28@ VZ     victim position (raised to eye height)
+//   29@ DEFENDER                   witness being recruited
+//   30@ DBG_COUNT                  counter for the debug lines (defenders on the
+//                                  field, how many were just released)
+//
+//  Nothing is needed for the release path: ReleaseOneDefender reads its slot
+//  inline instead of taking a handle in DEFENDER, which is what lets the recruit
+//  loop reuse an expired slot without a second scratch local.
 //****************************************************************************
 
 {
@@ -189,123 +227,119 @@ LVAR_INT   PLAYER_ACTOR             // 14@
 LVAR_INT   LAST_VICTIM              // 15@
 LVAR_INT   LAST_VICTIM_TIME         // 16@
 LVAR_INT   WAVE_TIME                // 17@
-LVAR_INT   ENABLED                  // 18@
-LVAR_INT   NOW                      // 19@
-LVAR_INT   LAST_SCAN                // 20@
-LVAR_INT   OPTIONS                  // 21@
+LVAR_INT   NOW                      // 18@
+LVAR_INT   OPTIONS                  // 19@
 
-LVAR_FLOAT PX PY PZ                 // 22@..24@
-LVAR_INT   CANDIDATE                // 25@
-LVAR_INT   CURSOR                   // 26@
-LVAR_INT   ROLL                     // 27@
+LVAR_FLOAT PX PY PZ                 // 20@..22@
+LVAR_INT   CANDIDATE                // 23@
+LVAR_INT   CURSOR                   // 24@
+LVAR_INT   ROLL                     // 25@
 
-LVAR_FLOAT VX VY VZ                 // 28@..30@
-LVAR_INT   DEFENDER                 // 31@
+LVAR_FLOAT VX VY VZ                 // 26@..28@
+LVAR_INT   DEFENDER                 // 29@
+LVAR_INT   DBG_COUNT                // 30@
 
 //----------------------------------------------------------------------------
 // Boot
 //----------------------------------------------------------------------------
 OPTIONS = OPTIONS_DEFAULT
-ENABLED = ENABLED_ON_START
-SET_CLEO_SHARED_VAR SHAREDVAR_ENABLED ENABLED
-SET_CLEO_SHARED_VAR SHAREDVAR_OPTIONS OPTIONS
 LAST_VICTIM = -1
 LAST_VICTIM_TIME = 0
 WAVE_TIME = 0
-LAST_SCAN = 0
+SET_CLEO_SHARED_VAR SHAREDVAR_ENABLED 1     // always active: there is no toggle
+SET_CLEO_SHARED_VAR SHAREDVAR_OPTIONS OPTIONS
+
+GOSUB DebugGate
+IF DBG_COUNT = 1
+    WRITE_DEBUG "MenReact: loaded, always active, no hotkey"
+ENDIF
 
 //****************************************************************************
 //* MAIN LOOP
 //****************************************************************************
-// The loop ticks every frame because IS_KEY_JUST_PRESSED (0E3D) is only true
-// on the frame the key goes down - polling it every 200 ms would swallow most
-// presses.  Everything expensive stays behind the LAST_SCAN gate below, so the
-// per-frame cost is one opcode until a key is actually pressed.
-LOOP_FOREVER:
-WAIT 0
-GOSUB PollHotkey
+// WHILE TRUE is the alias of 0485 IS_PC_VERSION declared in config/cleoplus.xml
+// (see that file and docs/COMPILER.md 3.12): always true on PC, so the loop only
+// ever ends on a BREAK or by the script being terminated.  It replaces the
+// "label + GOTO label" idiom the 2011 original had to use.
+//
+// One tick is SCAN_INTERVAL, not one frame.  Nothing here needs frame accuracy
+// any more - the hotkey that did is gone - and the recruit window below keeps its
+// own WAIT 0 inner loop for the part that does.
+WHILE TRUE
+WAIT SCAN_INTERVAL
+GET_GAME_TIMER NOW
 
 //----------------------------------------------------------------------------
-// Release everybody and idle while the game, not the player, is in charge.
+// Retire the defenders whose time is up.  Cheap: one compare when the list is
+// empty, which is nearly always.
+//----------------------------------------------------------------------------
+GOSUB ReleaseExpiredDefenders
+GOSUB DebugStatus
+
+//----------------------------------------------------------------------------
+// Idle while the game, not the player, is in charge.
 //
 // IS_PLAYER_PLAYING is false whenever CJ is wasted, busted or locked down by a
 // cutscene.  IS_ON_MISSION reads the global set by 0180, which a plain CLEO
 // script cannot reach at all - this is the gap that made the 2011 original
-// hijack mission peds.  IS_CHAR_SCRIPT_CONTROLLED later catches the script-owned
-// peds individually.
+// hijack mission peds.  IS_CHAR_SCRIPT_CONTROLLED later catches, one by one,
+// the peds a script created or adopted.
 //----------------------------------------------------------------------------
 IF NOT IS_PLAYER_PLAYING PLAYER_INDEX
     GOSUB ReleaseAllDefenders
-    GOTO LOOP_FOREVER
+    CONTINUE
 ENDIF
 GET_PLAYER_CHAR PLAYER_INDEX PLAYER_ACTOR
 IF NOT DOES_CHAR_EXIST PLAYER_ACTOR
     GOSUB ReleaseAllDefenders
-    GOTO LOOP_FOREVER
+    CONTINUE
 ENDIF
 IF IS_ON_MISSION
     GOSUB ReleaseAllDefenders
-    GOTO LOOP_FOREVER
+GOSUB DebugGate
+IF DBG_COUNT = 1
+        WRITE_DEBUG "MenReact: idle, a mission is running"
+    ENDIF
+    CONTINUE
 ENDIF
 IF IS_ON_CUTSCENE
     GOSUB ReleaseAllDefenders
-    GOTO LOOP_FOREVER
+    CONTINUE
 ENDIF
 IF IS_ON_SCRIPTED_CUTSCENE
     GOSUB ReleaseAllDefenders
-    GOTO LOOP_FOREVER
+    CONTINUE
 ENDIF
 
 BIT_AND OPTIONS OPT_IGNORE_WHEN_IN_CAR ROLL
 IF NOT ROLL = 0
     IF IS_CHAR_IN_ANY_CAR PLAYER_ACTOR
         GOSUB ReleaseAllDefenders
-        GOTO LOOP_FOREVER
+        CONTINUE
     ENDIF
 ENDIF
-
-IF ENABLED = 0
-    GOSUB ReleaseAllDefenders
-    GOTO LOOP_FOREVER
-ENDIF
-
-//----------------------------------------------------------------------------
-// Retire the defenders whose time is up (cheap: five slots, every frame)
-//----------------------------------------------------------------------------
-GOSUB ReleaseExpiredDefenders
-
-//----------------------------------------------------------------------------
-// Scan gate: the expensive victim search only runs every SCAN_INTERVAL ms
-//----------------------------------------------------------------------------
-GET_GAME_TIMER NOW
-NOW = NOW - LAST_SCAN
-IF NOW < SCAN_INTERVAL
-    GOTO LOOP_FOREVER
-ENDIF
-GET_GAME_TIMER LAST_SCAN
 
 //----------------------------------------------------------------------------
 // Global rate limit between two reactions
 //----------------------------------------------------------------------------
-GET_GAME_TIMER NOW
 NOW = NOW - WAVE_TIME
 IF NOW < WAVE_COOLDOWN
-    GOTO LOOP_FOREVER
+    CONTINUE
 ENDIF
-GET_GAME_TIMER NOW                  // absolute time again, used by the cooldown below
+GET_GAME_TIMER NOW
 
 //----------------------------------------------------------------------------
 // Look for a woman the player has just hurt
 //----------------------------------------------------------------------------
 GET_CHAR_COORDINATES PLAYER_ACTOR PX PY PZ
-CURSOR = 0
+CURSOR = 0                          // 0AE1 findNext = 0: start a fresh search
 
 SCAN_NEXT_CANDIDATE:
 GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE PX PY PZ VICTIM_SCAN_RADIUS CURSOR SEARCH_ALIVE_NPC CANDIDATE
 IF CANDIDATE = -1                   // 0AE1 yields -1 when the pool is exhausted
-    GOTO LOOP_FOREVER
+    CONTINUE                        // nothing around: wait SCAN_INTERVAL, rescan
 ENDIF
-CURSOR = 1
+CURSOR = 1                          // from here on: give me the NEXT one
 
 IF CANDIDATE = PLAYER_ACTOR
     GOTO SCAN_NEXT_CANDIDATE
@@ -363,49 +397,176 @@ CLEAR_CHAR_LAST_WEAPON_DAMAGE CANDIDATE
 // damage *record* the game keeps on her, not her AI: clearing them changes no
 // decision she makes, it only stops this script from re-reading a hit that has
 // already been answered.
+GOSUB DebugGate
+IF DBG_COUNT = 1
+    WRITE_DEBUG "MenReact: victim detected, recruiting witnesses"
+ENDIF
 GOSUB RecruitDefenders
 
-GOTO LOOP_FOREVER
+ENDWHILE
 
 //****************************************************************************
 //* SUBROUTINES
 //****************************************************************************
 
 //----------------------------------------------------------------------------
-// PollHotkey - F10 toggles the mod, silently.
-// IS_KEY_JUST_PRESSED is edge triggered, so no debounce is needed and holding
-// the key down cannot flip the state every frame.
-// reads:   ENABLED
-// writes:  ENABLED, shared var SHAREDVAR_ENABLED
-// clobbers: -
+// DebugGate - answers "should a debug line be written right now?".
+// result:  DBG_COUNT (30@) = 1 when yes, 0 when no
+// clobbers: DBG_COUNT (30@), ROLL (25@)
+//
+// WRITE_DEBUG (0662) is a no-op in the retail game, so the gate is not about
+// cost - it is about the opposite case: somebody who DOES run ScrDebug or
+// CLEO5's DebugUtils and wants the screen clean can clear OPT_DEBUG_TEXT.
+//
+// The caller's shape is always the same:
+//
+//      GOSUB DebugGate
+//      IF DBG_COUNT = 1
+//          WRITE_DEBUG "..."
+//      ENDIF
+//
+// A text cannot be passed to a subroutine - GTA3script has no string locals, and
+// a GOSUB argument lands in 0@.. which the CLEO_ARGS block owns - so the line
+// has to be written at its own call site.  That is also why there is no
+// per-rejection logging behind a RECRUIT_DEBUG flag: every filter would need its
+// own label to stay readable, and the two counters in DebugStatus below already
+// show whether the filters are rejecting everybody.
 //----------------------------------------------------------------------------
-PollHotkey:
-IF IS_KEY_JUST_PRESSED VK_F10
-    IF ENABLED = 1
-        ENABLED = 0
-    ELSE
-        ENABLED = 1
-    ENDIF
-    SET_CLEO_SHARED_VAR SHAREDVAR_ENABLED ENABLED
+DebugGate:
+DBG_COUNT = 0
+BIT_AND OPTIONS OPT_DEBUG_TEXT ROLL
+IF NOT ROLL = 0
+    DBG_COUNT = 1
 ENDIF
 RETURN
 
 //----------------------------------------------------------------------------
+// DebugStatus - the periodic two-line status block, once per main-loop tick.
+// clobbers: DBG_COUNT (30@), CURSOR (24@), ROLL (25@), NOW (18@), DEFENDER (29@)
+//
+// DEFENDER is safe to borrow here: the only call site is the top of the main
+// loop, far from the recruit window, which is the only place DEFENDER means
+// something.  It is used because a GOSUB DebugGate would overwrite DBG_COUNT,
+// which at that point still holds the number of defenders to print.
+//----------------------------------------------------------------------------
+DebugStatus:
+BIT_AND OPTIONS OPT_DEBUG_TEXT ROLL
+IF ROLL = 0
+    RETURN
+ENDIF
+DBG_COUNT = 0
+REPEAT MAX_DEFENDERS CURSOR
+    IF DEFENDER_HANDLE[CURSOR] > SLOT_EMPTY
+        DBG_COUNT = DBG_COUNT + 1
+    ENDIF
+ENDREPEAT
+WRITE_DEBUG_WITH_INT "MenReact defenders" DBG_COUNT
+
+GET_GAME_TIMER NOW
+NOW = NOW - WAVE_TIME               // age of the current cooldown
+NOW *= -1                           // gta3sc rejects "VAR = CONST - VAR" (and
+NOW = NOW + WAVE_COOLDOWN           // "VAR = 0 - VAR"), so negate with *= first
+IF NOW < 0
+    NOW = 0
+ENDIF
+DEFENDER = NOW / MS_PER_SECOND      // report it in seconds, not milliseconds
+WRITE_DEBUG_WITH_INT "MenReact cooldown left s" DEFENDER
+RETURN
+
+//----------------------------------------------------------------------------
+// IsCoward - would this male ped run away instead of acting against the player?
+// in:      DEFENDER (29@)
+// result:  sets the condition flag for the caller's "IF GOSUB IsCoward":
+//          RETURN_TRUE  -> he must be left completely alone
+//          RETURN_FALSE -> he is a candidate for recruitment
+// clobbers: CURSOR (24@), ROLL (25@)
+//
+// RETURN_TRUE and RETURN_FALSE are the aliases of 0485 IS_PC_VERSION and
+// 059A IS_AUSTRALIAN_GAME declared in config/cleoplus.xml.  They are conditions,
+// so each one sets the script's compare flag and the RETURN that follows hands
+// that flag to the caller - which is how a boolean subroutine is written in
+// GTA3script.  (They existed in GTA III and Vice City and were dropped from San
+// Andreas; Junior_Djjr's GTA3script topic re-introduces the names.)
+//
+// This is the test that vanilla CLEO cannot express at all, and the reason the
+// 2011 original rolled dice instead: there is no opcode in plain CLEO that can
+// ask what a ped's personality is.  Both readings below come from the game's own
+// data/pedstats.dat, via CLEO+.
+//----------------------------------------------------------------------------
+IsCoward:
+IF NOT DOES_CHAR_EXIST DEFENDER
+    RETURN_TRUE                     // unusable, so treat him as "leave alone"
+ENDIF
+
+// 1) GET_CHAR_STAT_ID: the ped's row in data/pedstats.dat (0-based).  The last
+//    column of that file is "Default decision maker", and the game's own header
+//    documents the value 4 as "coward peds" - the peds the R_Weak decision maker
+//    sends running.  Exactly nine rows carry it:
+//        16 SENSIBLE_GUY  17 GEEK_GUY  22 SENSIBLE_GIRL  23 GEEK_GIRL
+//        34 STEWARD       36 SHOPPER   37 OLDSHOPPER     40 SKATER
+//        42 COWARD
+//    Seven are male: 16, 17, 34, 36, 37, 40 and 42.  (The female half never
+//    reaches this point - IS_CHAR_MALE rejected it in the caller.)
+//
+//    Rows 14..25 are matched as one range because they are the twelve
+//    consecutive civilian "guy/girl" personality rows.  That deliberately also
+//    rejects the four male rows the game does NOT flag as coward - 14
+//    STREET_GUY (dm 2), 15 SUIT_GUY (dm 2), 18 OLD_GUY (dm 2) and 19 TOUGH_GUY
+//    (dm 3): the brief is to only ever touch a man who will actually act against
+//    the player, and in practice those four mill about, shout or wander off.
+//    Delete the range test below and keep the four individual ones to recruit
+//    them as well; nothing else has to change.
+GET_CHAR_STAT_ID DEFENDER CURSOR
+IF CURSOR >= PEDSTAT_STREET_GUY
+    IF CURSOR <= PEDSTAT_TOUGH_GIRL
+        RETURN_TRUE
+    ENDIF
+ENDIF
+IF CURSOR = PEDSTAT_STEWARD
+    RETURN_TRUE
+ENDIF
+IF CURSOR = PEDSTAT_SHOPPER
+    RETURN_TRUE
+ENDIF
+IF CURSOR = PEDSTAT_OLDSHOPPER
+    RETURN_TRUE
+ENDIF
+IF CURSOR = PEDSTAT_SKATER
+    RETURN_TRUE
+ENDIF
+IF CURSOR = PEDSTAT_COWARD
+    RETURN_TRUE
+ENDIF
+
+// 2) GET_CHAR_FEAR: the Fear column of the same file (0..100, 100 = scared of
+//    everything), the number the game itself uses to decide how quickly a ped
+//    runs away.  It catches the rows that are not flagged coward but panic
+//    anyway - TOURIST is fear 100 - and any value a ped mod or an edited
+//    pedstats.dat moved up.  Set MAX_FEAR to 100 to switch this second test off
+//    and keep only the pedstat blacklist.
+GET_CHAR_FEAR DEFENDER ROLL
+IF ROLL > MAX_FEAR
+    RETURN_TRUE
+ENDIF
+
+RETURN_FALSE
+
+//----------------------------------------------------------------------------
 // RecruitDefenders - for RECRUIT_WINDOW milliseconds, walk the ped pool around
 // the victim and hand TASK_KILL_CHAR_ON_FOOT to the witnesses that pass every
-// filter.  Whoever fails a filter is not read again and not modified in any
-// way: the game keeps controlling him normally.
-// in:      CANDIDATE (25@) = the victim, PLAYER_ACTOR (14@)
-// clobbers: everything from 19@ and 22@ up
+// filter.  Whoever fails a filter is not modified in any way: the game keeps
+// controlling him normally.
+// in:      CANDIDATE (23@) = the victim, PLAYER_ACTOR (14@)
+// clobbers: everything from 18@ and 20@ up
+//
+// The filters run cheapest first on purpose.  Distance and line of sight throw
+// away most of a crowded street for one opcode each, before anything reads a
+// ped's personality data.
 //----------------------------------------------------------------------------
 RecruitDefenders:
 
 RECRUIT_WINDOW_LOOP:
 WAIT 0
-GOSUB PollHotkey                    // F10 during a wave aborts the wave
-IF ENABLED = 0
-    RETURN
-ENDIF
 IF NOT IS_PLAYER_PLAYING PLAYER_INDEX
     RETURN
 ENDIF
@@ -433,14 +594,14 @@ ENDIF
 GET_CHAR_COORDINATES CANDIDATE VX VY VZ
 VZ = VZ + EYE_HEIGHT
 
-CURSOR = 0
+CURSOR = 0                          // 0AE1 findNext = 0: start a fresh search
 
 RECRUIT_NEXT_WITNESS:
 GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE VX VY VZ DEFEND_RADIUS CURSOR SEARCH_ALIVE_NPC DEFENDER
 IF DEFENDER = -1                    // 0AE1 yields -1 when the pool is exhausted
-    GOTO RECRUIT_WINDOW_LOOP
+    GOTO RECRUIT_WINDOW_LOOP        // ... so the whole 2.5 s window retries
 ENDIF
-CURSOR = 1
+CURSOR = 1                          // from here on: give me the NEXT one
 
 // --- usable at all? --------------------------------------------------------
 IF DEFENDER = PLAYER_ACTOR
@@ -471,9 +632,9 @@ ENDIF
 // --- created or adopted by a script? ---------------------------------------
 // IS_CHAR_SCRIPT_CONTROLLED (CLEO+) is true when the ped's "created by" field
 // says a script owns him - mission peds and peds spawned by other CLEO mods.
-// Random world peds are false, so this is not a substitute for the pedtype
-// test below: GET_PED_TYPE still catches the mission and player ped types that
-// were not script-created.
+// Random world peds are false, so this is not a substitute for the pedtype test
+// below: GET_PED_TYPE still catches the mission and player ped types that were
+// not script-created.
 IF IS_CHAR_SCRIPT_CONTROLLED DEFENDER
     GOTO RECRUIT_NEXT_WITNESS
 ENDIF
@@ -493,8 +654,6 @@ IF CURSOR >= PEDTYPE_PLAYER1
 ENDIF
 
 // --- close enough to have actually seen it? --------------------------------
-// Ordered before the personality tests on purpose: this is the cheapest way to
-// throw away the bulk of a crowded street, and everything below it costs more.
 IF NOT LOCATE_CHAR_DISTANCE_TO_CHAR DEFENDER CANDIDATE DEFEND_RADIUS
     GOTO RECRUIT_NEXT_WITNESS
 ENDIF
@@ -502,7 +661,7 @@ ENDIF
 // --- line of sight, so nobody reacts through a wall ------------------------
 // The 3D distance test above has no vertical tolerance of its own, so a witness
 // on a balcony would pass it; this ray is what keeps the reaction on the same
-// level as the victim.  PX/PY/PZ (22@..24@) are the scan-loop scratch and are
+// level as the victim.  PX/PY/PZ (20@..22@) are the scan-loop scratch and are
 // re-read every scan.
 GET_OFFSET_FROM_CHAR_IN_WORLD_COORDS DEFENDER NO_OFFSET NO_OFFSET EYE_HEIGHT PX PY PZ
 IF NOT IS_LINE_OF_SIGHT_CLEAR PX PY PZ VX VY VZ 1 0 1 0 0
@@ -510,65 +669,16 @@ IF NOT IS_LINE_OF_SIGHT_CLEAR PX PY PZ VX VY VZ 1 0 1 0 0
 ENDIF
 
 // --- already busy with a fight of his own? ---------------------------------
-// He is already being driven by the game's combat AI.  Giving him our task
-// would overwrite a decision the game made by itself, so he is left alone.
+// IS_CHAR_FIGHTING (CLEO+) means "has TASK_SIMPLE_FIGHT in his task chain this
+// frame", i.e. he is trading punches right now - not merely hostile.  Whoever is
+// already in a fistfight is being driven by the game's own combat AI, and
+// overwriting that would break the rule about peds that are not ours to move.
 IF IS_CHAR_FIGHTING DEFENDER
     GOTO RECRUIT_NEXT_WITNESS
 ENDIF
 
 // --- would he run away instead of acting? ----------------------------------
-// The "coward" test, and the reason this rewrite needs CLEO+.  Vanilla CLEO
-// cannot ask what a ped's personality is, so the 2011 original recruited
-// everybody and then rolled dice to decide whether the man attacked, shouted
-// or fled - which is how cowards ended up with scripted behaviour they would
-// never have chosen themselves.  Here they are filtered out and left alone.
-//
-// 1) GET_CHAR_STAT_ID: the ped's row in data/pedstats.dat (0-based).  The last
-//    column of that file is "Default decision maker", and the game's own header
-//    documents the value 4 as "coward peds" - the peds the R_Weak decision
-//    maker sends running.  Exactly nine rows carry it:
-//        16 SENSIBLE_GUY  17 GEEK_GUY  22 SENSIBLE_GIRL  23 GEEK_GIRL
-//        34 STEWARD       36 SHOPPER   37 OLDSHOPPER     40 SKATER
-//        42 COWARD
-//    Of those, seven are male: 16, 17, 34, 36, 37, 40 and 42.  Rows 14..25 are
-//    tested as one range because they are the twelve consecutive civilian
-//    "guy/girl" personality rows - the female half never reaches this point
-//    (IS_CHAR_MALE rejected it above), and the male half of the range that is
-//    NOT flagged coward by the game (14 STREET_GUY dm 2, 15 SUIT_GUY dm 2,
-//    18 OLD_GUY dm 2, 19 TOUGH_GUY dm 3) is rejected too, on purpose: the brief
-//    for this mod is to only ever touch a man who will actually act against the
-//    player, and in practice those four mill about, shout or wander off.  Drop
-//    the range test and keep the four individual ones to recruit them as well.
-GET_CHAR_STAT_ID DEFENDER CURSOR
-IF CURSOR >= PEDSTAT_STREET_GUY
-    IF CURSOR <= PEDSTAT_TOUGH_GIRL
-        GOTO RECRUIT_NEXT_WITNESS
-    ENDIF
-ENDIF
-IF CURSOR = PEDSTAT_STEWARD
-    GOTO RECRUIT_NEXT_WITNESS
-ENDIF
-IF CURSOR = PEDSTAT_SHOPPER
-    GOTO RECRUIT_NEXT_WITNESS
-ENDIF
-IF CURSOR = PEDSTAT_OLDSHOPPER
-    GOTO RECRUIT_NEXT_WITNESS
-ENDIF
-IF CURSOR = PEDSTAT_SKATER
-    GOTO RECRUIT_NEXT_WITNESS
-ENDIF
-IF CURSOR = PEDSTAT_COWARD
-    GOTO RECRUIT_NEXT_WITNESS
-ENDIF
-
-// 2) GET_CHAR_FEAR: the Fear column of the same file (0..100, 100 = scared of
-//    everything).  This is the number the game itself uses to decide how
-//    quickly a ped runs away, and it catches the rows that are not flagged
-//    coward but panic anyway - TOURIST (fear 100), and any value a ped-mod or
-//    an edited pedstats.dat moves up.  Set MAX_FEAR to 100 to disable this
-//    second test and keep only the pedstat blacklist.
-GET_CHAR_FEAR DEFENDER ROLL
-IF ROLL > MAX_FEAR
+IF GOSUB IsCoward
     GOTO RECRUIT_NEXT_WITNESS
 ENDIF
 
@@ -590,11 +700,7 @@ IF DEFENDER_HANDLE[4] = DEFENDER
 ENDIF
 
 // --- pick a free slot: empty, or expired -----------------------------------
-// ROLL (27@) doubles as the loop counter, CURSOR (26@) as the slot found.
-// An expired slot is emptied *and* its old defender released right here: the
-// 2011 original kept a fixed-size list and silently dropped the handle of a
-// ped it had already given a task to, which is how a man could end up chasing
-// the player forever with nobody left to time him out.
+// ROLL (25@) doubles as the loop counter, CURSOR (24@) as the slot found.
 CURSOR = NO_SLOT
 REPEAT MAX_DEFENDERS ROLL
     IF DEFENDER_HANDLE[ROLL] = SLOT_EMPTY
@@ -609,68 +715,74 @@ REPEAT MAX_DEFENDERS ROLL
     ENDIF
 ENDREPEAT
 IF NOT CURSOR > NO_SLOT
+    GOSUB DebugGate
+IF DBG_COUNT = 1
+        WRITE_DEBUG "MenReact: mob is full, witness left alone"
+    ENDIF
     GOTO RECRUIT_NEXT_WITNESS       // the mob is already big enough
 ENDIF
 
-// ROLL (27@) takes over the slot index from CURSOR (26@): ROLL has finished
-// its job as the REPEAT counter and CURSOR is needed as the kill-target scratch.
+// ROLL (25@) takes over the slot index from CURSOR (24@): ROLL has finished its
+// job as the REPEAT counter and CURSOR is about to be needed as the kill-target
+// scratch.
 ROLL = CURSOR
+
+// The chosen slot may still hold a defender who timed out but was never freed -
+// ReleaseExpiredDefenders had not run between his expiry and this moment.  He
+// has to be let go BEFORE his handle is overwritten, otherwise he would keep a
+// TASK_KILL_CHAR_ON_FOOT with nothing left to time it out: a man chasing the
+// player forever, which is exactly what the 2011 original did.
+//
+// Every read of the outgoing defender goes straight to DEFENDER_HANDLE[ROLL]
+// instead of through DEFENDER (29@).  That is not a stylistic choice: DEFENDER
+// is holding the witness we are about to recruit, and there is no second scratch
+// local to park him in - 0@..3@ belong to CLEO and PX/PY/PZ are FLOAT, which
+// gta3sc will not let hold a handle.  Reading the slot inline means the release
+// needs no scratch at all beyond CURSOR for the kill target.  This is the same
+// shape as ReleaseOneDefender below; keep the two in step.
 IF DEFENDER_HANDLE[ROLL] > SLOT_EMPTY
-    // The slot's occupant timed out but is still referenced, so he has to be
-    // let go before his handle is overwritten; otherwise he would keep a
-    // TASK_KILL_CHAR_ON_FOOT with nothing left to time it out - a man chasing
-    // the player forever, which is what the 2011 original did.
-    //
-    // Inlined copy of ReleaseOneDefender rather than a GOSUB, because DEFENDER
-    // (31@) has to hold the outgoing defender here and the witness afterwards,
-    // and there is no third scratch local left: 0@..3@ belong to CLEO and
-    // PX/PY/PZ are FLOAT.  Keep this in step with ReleaseOneDefender below.
-    DEFENDER = DEFENDER_HANDLE[ROLL]
-    DEFENDER_HANDLE[ROLL] = SLOT_EMPTY
-    IF DOES_CHAR_EXIST DEFENDER
-        IF NOT IS_CHAR_DEAD DEFENDER
-            GET_CHAR_KILL_TARGET_CHAR DEFENDER CURSOR
+    IF DOES_CHAR_EXIST DEFENDER_HANDLE[ROLL]
+        IF NOT IS_CHAR_DEAD DEFENDER_HANDLE[ROLL]
+            GET_CHAR_KILL_TARGET_CHAR DEFENDER_HANDLE[ROLL] CURSOR
             IF CURSOR = PLAYER_ACTOR
-                CLEAR_CHAR_TASKS_IMMEDIATELY DEFENDER
+                CLEAR_CHAR_TASKS_IMMEDIATELY DEFENDER_HANDLE[ROLL]
             ENDIF
         ENDIF
     ENDIF
 ENDIF
 
 // --- recruit him -----------------------------------------------------------
-// DEFENDER is loaded from the slot rather than carried in a register, so the
-// empty-slot path and the reused-slot path converge here without a stash.
 DEFENDER_HANDLE[ROLL] = DEFENDER
 GET_GAME_TIMER DEFENDER_SINCE[ROLL]
-GOSUB ReactDefender
+TASK_KILL_CHAR_ON_FOOT DEFENDER PLAYER_ACTOR
+
+GOSUB DebugGate
+IF DBG_COUNT = 1
+    DBG_COUNT = 0                   // the gate answered in DBG_COUNT, and now
+    REPEAT MAX_DEFENDERS CURSOR     // the line wants the real defender count
+        IF DEFENDER_HANDLE[CURSOR] > SLOT_EMPTY
+            DBG_COUNT = DBG_COUNT + 1
+        ENDIF
+    ENDREPEAT
+    WRITE_DEBUG_WITH_INT "MenReact recruited, defenders now" DBG_COUNT
+ENDIF
+
 WAIT RECRUIT_STEP_DELAY             // never recruit a whole crowd in one frame
 GOTO RECRUIT_WINDOW_LOOP
 
 //----------------------------------------------------------------------------
-// ReactDefender - the one and only thing this mod does to a pedestrian.
-// in:      DEFENDER (31@), PLAYER_ACTOR (14@)
-// clobbers: -
-//
-// Deliberately absent, and the reason is in docs/ANALISE.md: no
-// SET_CHAR_KEEP_TASK, no SET_SENSE_RANGE, no SET_CHAR_ACCURACY, no
-// TASK_SET_CHAR_DECISION_MAKER, no flee task, no fist shaking, no staring.
-// Those either rewrote the ped's personality or forced behaviour on peds that
-// were never going to act; the man who is going to act needs exactly one task.
-//----------------------------------------------------------------------------
-ReactDefender:
-TASK_KILL_CHAR_ON_FOOT DEFENDER PLAYER_ACTOR
-RETURN
-
-//----------------------------------------------------------------------------
 // ReleaseExpiredDefenders - drop whoever has given up.
-// clobbers: NOW (19@), CURSOR (26@), ROLL (27@), DEFENDER (31@)
+// clobbers: NOW (18@), CURSOR (24@), ROLL (25@), DBG_COUNT (30@)
+// NOW is used as the parking place for the REPEAT counter, so it does not
+// survive the loop even though it was read once at the top.
 //----------------------------------------------------------------------------
 ReleaseExpiredDefenders:
-// Fast path.  This runs every frame, and on every frame where nobody was
-// recruited - which is nearly all of them - the only work left is one compare.
-// DEFENDER_HANDLE[0] is local 4@: gta3sc allocates locals in declaration order
-// from 0@, and 0@..3@ are the reserved CLEO_ARGS, so the map in the header is
-// literal and the five slots are 4@..8@.
+// Fast path.  DEFENDER_HANDLE[0] is local 4@: gta3sc allocates locals in
+// declaration order from 0@, and 0@..3@ are the reserved CLEO_ARGS, so the map
+// in the header is literal and the five slots are 4@..8@.  Slots are filled from
+// index 0 upwards and only ever freed in order, so an empty slot 0 means an
+// empty list - and that is the state this routine is called in on almost every
+// tick of the main loop.
 IF DEFENDER_HANDLE[0] = SLOT_EMPTY
     RETURN
 ENDIF
@@ -679,47 +791,74 @@ REPEAT MAX_DEFENDERS CURSOR
     IF DEFENDER_HANDLE[CURSOR] > SLOT_EMPTY
         ROLL = NOW - DEFENDER_SINCE[CURSOR]
         IF ROLL > DEFENDER_TIMEOUT
-            DEFENDER = DEFENDER_HANDLE[CURSOR]
+            // CURSOR is the REPEAT counter AND the slot ReleaseOneDefender reads,
+            // and gta3sc compiles REPEAT as "increment the variable itself" - so
+            // the counter has to be parked and put back around the call.  See
+            // docs/COMPILER.md 3.12.  NOW is free here: it holds the timestamp
+            // this routine read once at the top and does not need again.
+            NOW = CURSOR
+            GOSUB ReleaseOneDefender        // reads DEFENDER_HANDLE[CURSOR]
+            CURSOR = NOW
             DEFENDER_HANDLE[CURSOR] = SLOT_EMPTY
-            GOSUB ReleaseOneDefender
+            GOSUB DebugGate
+            IF DBG_COUNT = 1
+                WRITE_DEBUG "MenReact: defender timed out, released"
+            ENDIF
         ENDIF
     ENDIF
 ENDREPEAT
 RETURN
 
 //----------------------------------------------------------------------------
-// ReleaseAllDefenders - the player died, got busted, hopped into a car, a
-// mission or a cutscene started, or the mod got switched off: everybody minds
-// their own business again.
-// clobbers: CURSOR (26@), DEFENDER (31@)
+// ReleaseAllDefenders - the player died, got busted, hopped into a car, or a
+// mission or a cutscene started: everybody minds their own business again.
+// clobbers: CURSOR (24@), ROLL (25@), DBG_COUNT (30@)
 //----------------------------------------------------------------------------
 ReleaseAllDefenders:
-// Same fast path as ReleaseExpiredDefenders: the slots are filled from index 0
-// upwards and are only ever freed in order, so an empty slot 0 means an empty
-// list.  This routine is reached every frame while the player is in a mission,
-// a cutscene or a car, and almost always has nothing to do.
 IF DEFENDER_HANDLE[0] = SLOT_EMPTY
-    RETURN
+    RETURN                          // same fast path, and the common case
 ENDIF
+DBG_COUNT = 0
 REPEAT MAX_DEFENDERS CURSOR
     IF DEFENDER_HANDLE[CURSOR] > SLOT_EMPTY
-        DEFENDER = DEFENDER_HANDLE[CURSOR]
+        DEFENDER = CURSOR               // park the REPEAT counter: 29@ is dead
+        GOSUB ReleaseOneDefender        // in the main loop, our only caller
+        CURSOR = DEFENDER
         DEFENDER_HANDLE[CURSOR] = SLOT_EMPTY
-        GOSUB ReleaseOneDefender
+        DBG_COUNT = DBG_COUNT + 1
     ENDIF
 ENDREPEAT
+IF DBG_COUNT > 0
+    WRITE_DEBUG_WITH_INT "MenReact released defenders" DBG_COUNT
+ENDIF
 RETURN
 
 //----------------------------------------------------------------------------
-// ReleaseOneDefender - put DEFENDER (31@) back to being a normal pedestrian.
-// in:      DEFENDER (31@)
-// clobbers: CURSOR (26@)
+// ReleaseOneDefender - put the defender in DEFENDER_HANDLE[CURSOR] back to being
+// a normal pedestrian.
+// in:      CURSOR (24@) = the slot to release
+// clobbers: CURSOR (24@), ROLL (25@)
 //
-// The task is only taken away from a ped that is still holding *our* task,
-// which GET_CHAR_KILL_TARGET_CHAR answers exactly: if his kill target is not
-// the player any more, the game has moved him on to something else and we do
-// not clear it.  That keeps the "do not touch peds that are not acting against
-// the player" rule true on the way out as well as on the way in.
+// It reads its slot inline rather than taking a handle in DEFENDER (29@).  That
+// is what makes the recruit loop able to free an expired slot while DEFENDER is
+// holding the witness it is about to recruit: there is no second scratch local
+// for a handle anywhere in this script, and a FLOAT one cannot hold an int in
+// gta3sc.
+//
+// The contract with the caller is the subtle part.  CURSOR arrives holding the
+// slot index and LEAVES holding the kill target, because gta3sc compiles
+// "REPEAT n CURSOR" into "increment CURSOR itself" - a subroutine that quietly
+// rewrites the counter makes the loop end after one pass, and the emitted
+// bytecode shows it (ADD_VAL_TO_INT_LVAR on the counter variable).  Both callers
+// therefore park CURSOR before the call and restore it after.  The kill target
+// itself goes into ROLL so that the slot index is at least not needed twice.
+//
+// The task is only taken away from a ped that is still holding *our* task, which
+// GET_CHAR_KILL_TARGET_CHAR answers exactly: CLEO+ reads the target pointer out
+// of the TASK_COMPLEX_KILL_PED_ON_FOOT struct that 05E2 created, so if it is not
+// the player any more the game has moved him on and we do not clear it.  That
+// keeps "do not touch peds that are not acting against the player" true on the
+// way out as well as on the way in.
 //
 // Every handle used here came from the *_NO_SAVE variant of the random char
 // opcodes, so this script never owned a reference to those peds: there is
@@ -727,15 +866,15 @@ RETURN
 // original instead created a CGroup per assault and never removed it.
 //----------------------------------------------------------------------------
 ReleaseOneDefender:
-IF NOT DOES_CHAR_EXIST DEFENDER
+IF NOT DOES_CHAR_EXIST DEFENDER_HANDLE[CURSOR]
     RETURN
 ENDIF
-IF IS_CHAR_DEAD DEFENDER
+IF IS_CHAR_DEAD DEFENDER_HANDLE[CURSOR]
     RETURN
 ENDIF
-GET_CHAR_KILL_TARGET_CHAR DEFENDER CURSOR
-IF CURSOR = PLAYER_ACTOR
-    CLEAR_CHAR_TASKS_IMMEDIATELY DEFENDER
+GET_CHAR_KILL_TARGET_CHAR DEFENDER_HANDLE[CURSOR] ROLL
+IF ROLL = PLAYER_ACTOR
+    CLEAR_CHAR_TASKS_IMMEDIATELY DEFENDER_HANDLE[CURSOR]
 ENDIF
 RETURN
 

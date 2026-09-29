@@ -28,8 +28,9 @@ CLEOPLUS="$ROOT/config/cleoplus.xml"
 #   --add-config=...      append the CLEO+ opcode definitions (see $CLEOPLUS)
 #   --guesser             allow the language features the community had to guess
 #   --cs                  emit a CLEO .cs (headerless, -fcleo, local offsets)
-#   -fbreak-continue      allow BREAK inside REPEAT/WHILE
-#   -fno-entity-tracking  see the note in docs/COMPILER.md section 3.11: gta3sc's
+#   -fbreak-continue      allow BREAK inside REPEAT/WHILE, and make "WHILE TRUE"
+#                         usable as the main loop (docs/COMPILER.md 3.11)
+#   -fno-entity-tracking  see the note in docs/COMPILER.md section 3.14: gta3sc's
 #                         entity checker does not propagate a type through array
 #                         elements, so storing ped handles in DEFENDER_HANDLE[5]
 #                         (which is the whole point of the slot table) makes every

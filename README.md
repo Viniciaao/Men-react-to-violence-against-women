@@ -33,7 +33,13 @@ compilação) e o que cada um virou aqui.
 1. Tenha o **CLEO 4.1+** instalado no GTA San Andreas.
 2. Instale o **CLEO+** — <https://github.com/JuniorDjjr/CLEOPlus>.
 3. Copie `bin/MOBBNOBRAVEZA.cs` para a pasta `CLEO` do jogo.
-4. Jogue. **F10** liga/desliga o mod em tempo real (silenciosamente).
+4. Jogue. O mod está **sempre ativo** — não existe tecla de liga/desliga, nem
+   mensagem na tela. A reação é o próprio feedback.
+
+   Opcional, só para quem desenvolve mods: instale o
+   [ScrDebug](https://www.mixmods.com.br/2017/06/sa-scrdebug/) (ou o plugin
+   `DebugUtils` do CLEO5) e o mod passa a escrever o que está fazendo na tela.
+   Veja [Depuração](#depuracão-scrdebug--cleo5-debugutils).
 
 > ### CLEO+ é obrigatório, não opcional
 >
@@ -47,11 +53,15 @@ Opcodes usados:
 | Origem | Opcodes |
 |---|---|
 | CLEO (vanilla) | `0AE1 GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE`, `0AB3 SET_CLEO_SHARED_VAR`, `0B10/0B11 BIT_AND/BIT_OR` |
-| **CLEO+** | `0E1D IS_ON_MISSION`, `0E25 IS_ON_CUTSCENE`, `0EB7 IS_ON_SCRIPTED_CUTSCENE`, `0E3D IS_KEY_JUST_PRESSED`, `0E0A IS_CHAR_SCRIPT_CONTROLLED`, `0E47 IS_CHAR_FIGHTING`, `0EFA GET_CHAR_FEAR`, `0EB1 GET_CHAR_STAT_ID`, `0E44 GET_CHAR_KILL_TARGET_CHAR`, `0EE4 LOCATE_CHAR_DISTANCE_TO_CHAR` |
+| **CLEO+** (9) | `0E1D IS_ON_MISSION`, `0E25 IS_ON_CUTSCENE`, `0EB7 IS_ON_SCRIPTED_CUTSCENE`, `0E0A IS_CHAR_SCRIPT_CONTROLLED`, `0E47 IS_CHAR_FIGHTING`, `0EFA GET_CHAR_FEAR`, `0EB1 GET_CHAR_STAT_ID`, `0E44 GET_CHAR_KILL_TARGET_CHAR`, `0EE4 LOCATE_CHAR_DISTANCE_TO_CHAR` |
+| Rockstar (depuração) | `0662 WRITE_DEBUG`, `0663 WRITE_DEBUG_WITH_INT` — *no-op* no jogo de varejo |
+| Aliases GTA3script | `0x485 TRUE`/`RETURN_TRUE`, `0x59A RETURN_FALSE` — declarados em `config/cleoplus.xml` |
 
 Para outros mods / ferramentas: o estado é publicado em variáveis compartilhadas
-CLEO — **3100** = ligado (1) ou desligado (0), **3101** = campo de bits das
-opções ativas.
+CLEO — **3100** = `1`, sempre (o mod não tem como ser desligado em jogo, mas a
+variável continua sendo o contrato público), **3101** = campo de bits das opções
+ativas. Um script de fora pode escrever em **3101** para, por exemplo, limpar o
+bit de depuração.
 
 ## O filtro de covardes
 
@@ -93,9 +103,8 @@ edite e recompile com `./build.sh`.
 
 | Constante | Padrão | O que faz |
 |---|---|---|
-| `OPTIONS_DEFAULT` | `3` | Campo de bits das features opcionais (veja abaixo) |
-| `ENABLED_ON_START` | `1` | Começa ligado |
-| `SCAN_INTERVAL` | `200` ms | Intervalo da varredura cara (o laço roda a cada frame) |
+| `OPTIONS_DEFAULT` | `7` | Campo de bits das features opcionais (veja abaixo) |
+| `SCAN_INTERVAL` | `200` ms | Período do `WHILE TRUE` do laço principal |
 | `VICTIM_SCAN_RADIUS` | `3.0` m | Raio em que se procura uma mulher agredida |
 | `DEFEND_RADIUS` | `25.0` m | Raio em que as testemunhas reagem (3D) |
 | `MAX_DEFENDERS` | `5` | **Teto** de defensores simultâneos (o original não tinha) |
@@ -107,7 +116,6 @@ edite e recompile com `./build.sh`.
 | `WAVE_COOLDOWN` | `8000` ms | Intervalo mínimo entre duas reações |
 | `VICTIM_COOLDOWN` | `25000` ms | Antes que a *mesma* mulher dispare de novo |
 | `EYE_HEIGHT` | `0.7` | Altura do raio de linha de visão |
-| `KEY_F10` | `121` | Tecla de liga/desliga (virtual-key code) |
 
 Bits de `OPTIONS_DEFAULT` (some os valores e coloque o total):
 
@@ -115,6 +123,7 @@ Bits de `OPTIONS_DEFAULT` (some os valores e coloque o total):
 |---|---|
 | `1` | `IGNORE_WHEN_IN_CAR` — não age enquanto o jogador dirige |
 | `2` | `MELEE_ONLY` — ignora tiros/explosões, só socos e atropelamento |
+| `4` | `DEBUG_TEXT` — escreve as linhas de depuração (só visíveis com ScrDebug) |
 
 > O gta3sc não tem *constant folding*: não dá para escrever `IF CONST = 1`
 > (erro `could not match alternative`, porque não existe
@@ -145,8 +154,10 @@ gta3sc src/MOBBNOBRAVEZA.sc --config=gtasa \
 
 Os dois arquivos de suporte são parte do projeto, não detalhes do ambiente:
 
-* **[`config/cleoplus.xml`](config/cleoplus.xml)** — declara os 10 opcodes
-  CLEO+ para o compilador, mais o enum oficial `PEDSTAT`. O `config/gtasa/cleo.xml`
+* **[`config/cleoplus.xml`](config/cleoplus.xml)** — declara os 9 opcodes CLEO+
+  para o compilador, mais o enum oficial `PEDSTAT` e os aliases `TRUE` /
+  `RETURN_TRUE` / `RETURN_FALSE` (que são `0x485` e `0x59A` renomeados; sem eles
+  o `WHILE TRUE` e o predicado `IsCoward` não compilam). O `config/gtasa/cleo.xml`
   que vem com o gta3sc para em `0xB16`, então ele não conhece nenhum `0Exx`.
   Passado com `--add-config` (caminho absoluto: o gta3sc resolve caminhos
   relativos a partir do diretório de configuração *dele*).
@@ -154,16 +165,23 @@ Os dois arquivos de suporte são parte do projeto, não detalhes do ambiente:
   O CLEO+ **já traz** um XML para gta3sc (`(for developers)/gta3script/cleo.xml`),
   e cada declaração daqui foi comparada com ele — mesmo ID, mesma ordem e mesmos
   atributos. Usar o arquivo oficial direto não dá: ele é um *superset* de 439
-  comandos e o `--add-config` **anexa**, o que redefiniria dois opcodes vanilla
-  do SA (`0x485 IS_PC_VERSION` viraria `RETURN_TRUE`, `0x59A IS_AUSTRALIAN_GAME`
-  viraria `RETURN_FALSE`) e sobrescreveria dois valores do enum `BONE`. Daí o
-  extrato mínimo. Análise completa em `docs/COMPILER.md` §5.1.
+  comandos e o `--add-config` **anexa**, o que sobrescreveria dois valores do
+  enum `BONE` e traria centenas de comandos que este mod não usa. Daí o extrato
+  mínimo. Análise completa em `docs/COMPILER.md` §5.1.
+
+  Vale o registro porque esta documentação já afirmou o contrário: os aliases
+  `RETURN_TRUE`/`RETURN_FALSE` do XML oficial **não são um problema** — o gta3sc
+  aceita vários `<Command>` com o mesmo ID, que viram alternadores, então
+  `IS_PC_VERSION` continua funcionando ao lado de `RETURN_TRUE`. É exatamente o
+  mecanismo que o Junior_Djjr descreve no
+  [fórum MixMods](https://forum.mixmods.com.br/f16-utilidades/t179-gta3script-while-true-return_true-e-return_false),
+  e é o que `config/cleoplus.xml` faz aqui de propósito (§3.11 do COMPILER.md).
 * **`-fno-entity-tracking`** — o verificador de tipos de entidade do gta3sc não
   propaga o tipo através de elementos de array, e guardar handles de ped num
   array (`DEFENDER_HANDLE[5]`) é justamente o design do mod. Sem a flag, todo
   uso posterior de `DEFENDER` vira `expected variable of type CHAR but got NONE`.
   É uma checagem só de compilação: não muda um byte do `.cs` gerado.
-  Detalhes em [`docs/COMPILER.md`](docs/COMPILER.md), §3.11.
+  Detalhes em [`docs/COMPILER.md`](docs/COMPILER.md), §3.14.
 
 ### O compilador no Linux
 
@@ -207,13 +225,13 @@ build/                   *.o, *.ir2.txt             (ignorado pelo git)
 ## Como funciona por dentro
 
 ```
-laço principal (WAIT 0 - roda todo frame; o caro fica atrás do portão de 200 ms)
-  ├─ PollHotkey                     (F10, edge-triggered, sem debounce)
+WHILE TRUE / WAIT SCAN_INTERVAL (200 ms) - sempre ativo, nenhuma tecla
+  ├─ ReleaseExpiredDefenders        (fast path: 1 comparador se não há ninguém)
+  ├─ DebugStatus                    (2 contadores; nada sem OPT_DEBUG_TEXT)
   ├─ IS_PLAYER_PLAYING / GET_PLAYER_CHAR
   ├─ IS_ON_MISSION / IS_ON_CUTSCENE / IS_ON_SCRIPTED_CUTSCENE  → libera todos
-  ├─ IS_CHAR_IN_ANY_CAR (opcional) / ENABLED = 0               → libera todos
-  ├─ ReleaseExpiredDefenders        (fast path: 1 comparador se não há ninguém)
-  ├─ portão de SCAN_INTERVAL (200 ms) e rate limit (WAVE_COOLDOWN)
+  ├─ IS_CHAR_IN_ANY_CAR (opcional)                             → libera todos
+  ├─ rate limit (WAVE_COOLDOWN)
   └─ varre peds a 3 m do jogador com 0AE1
        └─ mulher? a pé? foi danificada pelo jogador? (flags consumidas na hora)
             └─ RecruitDefenders     (janela de 2,5 s, WAIT 0)
@@ -224,7 +242,7 @@ laço principal (WAIT 0 - roda todo frame; o caro fica atrás do portão de 200 
                     → está a DEFEND_RADIUS da vítima (0EE4)
                     → linha de visão livre até ela
                     → não está já lutando (0E47)
-                    → NÃO é covarde: pedstat (0EB1) e fear (0EFA)
+                    → IF GOSUB IsCoward (pedstat 0EB1 e fear 0EFA) → pula
                     → ainda não foi recrutado, e há slot livre
                     → TASK_KILL_CHAR_ON_FOOT (nada mais)
 ```
@@ -237,6 +255,59 @@ Os handles vêm sempre da variante `*_NO_SAVE` do `0AE1`, ou seja, o script
 **nunca é dono de nenhuma referência** de ped: não há o que vazar e não há
 `MARK_CHAR_AS_NO_LONGER_NEEDED` para esquecer. Nenhum `CGroup` é criado (o
 original criava um por agressão e nunca o removia).
+
+## Depuração (ScrDebug / CLEO5 DebugUtils)
+
+O mod escreve o que está fazendo usando os opcodes de depuração **da própria
+Rockstar**, `0662 WRITE_DEBUG` e `0663 WRITE_DEBUG_WITH_INT`. Eles existem no jogo
+de varejo como *no-op* — a Sanny Builder Library marca os três da família com
+`is_nop: true` — então **quem não instalou nada não vê diferença nenhuma**: nem
+texto, nem log, nem custo. É o mesmo mecanismo que o mod de 2011 usava para o
+crédito na tela.
+
+Para ver as linhas, instale um dos dois:
+
+| Ferramenta | O que fazer |
+|---|---|
+| [ScrDebug](https://www.mixmods.com.br/2017/06/sa-scrdebug/) (Deji) | Só instalar. Reimplementa o sistema de depuração pré-lançamento e também religa os checadores de tecla `0735`/`0736` que a Rockstar usava para esconder cheats no `main.scm` |
+| CLEO5 + plugin `DebugUtils` | Ligar `DebugUtils.General.LegacyDebugOpcodes = 1` no `.ini` |
+
+As linhas (o gta3sc **caixa-alta** literais de string, então é assim que elas
+aparecem):
+
+```
+MENREACT: LOADED, ALWAYS ACTIVE, NO HOTKEY     <- uma vez, no boot
+MENREACT DEFENDERS: 2                          <- a cada 200 ms
+MENREACT COOLDOWN LEFT S: 5                    <- a cada 200 ms
+MENREACT: IDLE, A MISSION IS RUNNING
+MENREACT: VICTIM DETECTED, RECRUITING WITNESSES
+MENREACT: MOB IS FULL, WITNESS LEFT ALONE
+MENREACT RECRUITED, DEFENDERS NOW: 3
+MENREACT: DEFENDER TIMED OUT, RELEASED
+MENREACT RELEASED DEFENDERS: 3
+```
+
+Duas coisas que a implementação impõe e que valem saber antes de editar:
+
+* **A string do `WRITE_DEBUG_WITH_INT` é um rótulo, não um formato.** O CLEO5 faz
+  `ss << text << ": " << value`, então `"MenReact defenders" 3` sai
+  `MENREACT DEFENDERS: 3`. Escrever `%d` imprimiria o `%d`.
+* **Não dá para passar texto por `GOSUB`.** Argumento de `GOSUB` cai em `0@..`,
+  que pertence ao bloco `CLEO_ARGS`, e não existe variável local de string. Por
+  isso cada linha é escrita no próprio ponto de chamada, atrás de um portão
+  (`DebugGate`) que responde em `DBG_COUNT`:
+
+```
+GOSUB DebugGate
+IF DBG_COUNT = 1
+    WRITE_DEBUG "MenReact: victim detected, recruiting witnesses"
+ENDIF
+```
+
+Desligue tudo com `OPTIONS_DEFAULT = 3` (tira o bit `4`), ou em tempo de jogo
+escrevendo em **3101** a partir de outro script.
+
+Detalhes completos em [`docs/COMPILER.md`](docs/COMPILER.md) §8.
 
 ## Missões
 

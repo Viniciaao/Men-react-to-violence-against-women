@@ -88,7 +88,7 @@ gta3sc src/MOBBNOBRAVEZA.sc --config=gtasa \
   string only works if the current directory happens to be the config dir.
   `build.sh` therefore expands it to `$ROOT/config/cleoplus.xml`.
 * `-fno-entity-tracking` disables the compile-time entity-type checker — see
-  §3.11. It changes nothing in the emitted bytecode.
+  §3.14. It changes nothing in the emitted bytecode.
 
 ## 3. Language gotchas found while compiling
 
@@ -298,7 +298,112 @@ gta3sc decompile bin/MOBBNOBRAVEZA.cs --config=gtasa \
 `build.sh --verify` runs this and prints the locals/gosub/return counts as a
 sanity check.
 
-### 3.11 The entity checker does not understand arrays
+### 3.11 `WHILE TRUE`, `RETURN_TRUE` and `RETURN_FALSE` exist — as aliases
+
+These three names are real GTA3script, and gta3sc compiles them, but **only
+after you declare them**. They are not new opcodes: Junior_Djjr's
+[`[GTA3script] WHILE TRUE, RETURN_TRUE e RETURN_FALSE`](https://forum.mixmods.com.br/f16-utilidades/t179-gta3script-while-true-return_true-e-return_false)
+simply renames two San Andreas opcodes that always answer the same thing on PC,
+and which GTA III and Vice City had under those very names:
+
+```xml
+<Command ID="0x485" Name="TRUE"/>          <!-- IS_PC_VERSION      -->
+<Command ID="0x485" Name="RETURN_TRUE"/>
+<Command ID="0x59a" Name="RETURN_FALSE"/>  <!-- IS_AUSTRALIAN_GAME -->
+```
+
+Two things make this work and are worth knowing:
+
+* **gta3sc accepts several `<Command>` entries sharing one ID.** They become
+  alternators, so `IS_PC_VERSION` keeps working in old scripts and `RETURN_TRUE`
+  becomes available next to it. That is what makes the aliases addable from an
+  `--add-config` file without touching `commands.xml`.
+* **They are conditions, not statements.** `RETURN_TRUE` sets the script's
+  compare flag; the `RETURN` after it hands that flag to the caller, which reads
+  it with `IF GOSUB`. This is how a boolean subroutine is written:
+
+```
+IF GOSUB IsCoward
+    GOTO RECRUIT_NEXT_WITNESS
+ENDIF
+...
+IsCoward:
+IF <test>
+    RETURN_TRUE
+ENDIF
+RETURN_FALSE
+```
+
+and it emits exactly what you would expect — `GOSUB` / `GOTO_IF_FALSE`, then
+`IS_PC_VERSION` or `IS_AUSTRALIAN_GAME` before the `RETURN`. The decompiler
+prints the *first* registered name for an ID, so `RETURN_TRUE` comes back as
+`IS_PC_VERSION` in the IR; the encoding is right either way.
+
+With `IF GOSUB` available, `-fbreak-continue` gives the full modern loop
+vocabulary: `WHILE TRUE` / `BREAK` / `CONTINUE` / `ENDWHILE`, replacing the
+`label:` + `GOTO label` idiom that the retail scripts (and the 2011 original)
+had to use.
+
+### 3.12 `REPEAT` increments the variable you give it
+
+```
+REPEAT MAX_DEFENDERS CURSOR
+    ...
+    GOSUB ReleaseOneDefender      // writes CURSOR
+    ...
+ENDREPEAT
+```
+
+compiles to
+
+```
+MAIN_n:   <body>
+          ADD_VAL_TO_INT_LVAR 24@ 1
+          IS_INT_LVAR_GREATER_OR_EQUAL_TO_NUMBER 24@ 5
+          GOTO_IF_FALSE %MAIN_n
+```
+
+The counter **is** the variable — there is no hidden loop register. So a
+subroutine that writes to it silently shortens the loop: in this mod that meant
+"release every defender whose time is up" releasing exactly one and then ending,
+because `ReleaseOneDefender` used the same local for the kill target.
+
+The bug is invisible in the source and obvious in the IR, which is a good
+argument for `build.sh --verify` being part of the workflow rather than an
+occasional check. The fix is to park and restore the counter around the call:
+
+```
+NOW = CURSOR
+GOSUB ReleaseOneDefender
+CURSOR = NOW
+```
+
+`WHILE`/`REPEAT` are otherwise fine — this only bites when the body calls
+something that touches the counter.
+
+### 3.13 Three arithmetic forms that do not exist
+
+```
+NOW = WAVE_COOLDOWN - NOW     ->  error: cannot do VAR1 = THING - VAR1
+NOW = 0 - NOW                 ->  same error
+NOW = CONST / NOW             ->  cannot do VAR1 = THING / VAR1
+```
+
+`SET var, expr` only ever emits "store", "add to", "subtract from", "multiply
+by", so the variable has to be the *left* operand of its own update. To compute
+`CONST - var` you negate first and then add — and negation itself has to use the
+compound form, because `0 - VAR` is the same rejected shape:
+
+```
+NOW *= -1
+NOW = NOW + WAVE_COOLDOWN
+```
+
+`*=` is in the lexer (`Token::EqTimes`) even though the assignment-expression
+docs do not mention it. `VAR / CONST` is fine (`DEFENDER = NOW / MS_PER_SECOND`);
+only the reversed operands are a problem.
+
+### 3.14 The entity checker does not understand arrays
 
 `-fentity-tracking` is on by default and makes every variable remember which
 entity type it last held, so a ped handle cannot be passed where a car handle is
@@ -457,7 +562,7 @@ Points that are easy to get wrong:
   byte search for `E4 0E` finds nothing.
 * **Outputs go last and take `Out="true"`.** A `FLOAT` output needs a `LVAR_FLOAT`
   at the call site; `Entity="CHAR"` on an output makes the destination variable a
-  `CHAR` for the entity checker (§3.11).
+  `CHAR` for the entity checker (§3.14).
 * **Only `INT FLOAT PARAM LABEL CONSTANT TEXT_LABEL TEXT_LABEL16 TEXT_LABEL32
   STRING` are valid `Type` values** (`src/config.cpp`, `xml_to_argtype`). Sanny
   Builder Library types such as `KeyCode`, `PedStat`, `PedState` and `any` have to
@@ -477,19 +582,37 @@ every one of them was verified in the compiled bytecode (§6).
 `build.sh --verify` disassembles the result, but a disassembly cannot prove that
 an opcode ID is the one CLEO+ implements. The direct check is a byte scan of the
 `.cs` for the little-endian 16-bit ID — remembering that an inverted condition
-carries the `0x8000` bit:
+carries the `0x8000` bit, which is why `IF NOT LOCATE_CHAR_DISTANCE_TO_CHAR`
+shows up as `E4 8E` and not `E4 0E`:
 
 ```
+CLEO+
 0x0E1D IS_ON_MISSION                 x1     0x0EFA GET_CHAR_FEAR              x1
 0x0E25 IS_ON_CUTSCENE                x1     0x0EB1 GET_CHAR_STAT_ID           x1
-0x0EB7 IS_ON_SCRIPTED_CUTSCENE       x1     0x0E44 GET_CHAR_KILL_TARGET_CHAR  x1
-0x0E3D IS_KEY_JUST_PRESSED           x1     0x8EE4 NOT LOCATE_CHAR_DISTANCE.. x1
-0x0E0A IS_CHAR_SCRIPT_CONTROLLED     x1     0x05E2 TASK_KILL_CHAR_ON_FOOT     x1
-0x0E47 IS_CHAR_FIGHTING              x1     0x0792 CLEAR_CHAR_TASKS_IMM..     x1
+0x0EB7 IS_ON_SCRIPTED_CUTSCENE       x1     0x0E44 GET_CHAR_KILL_TARGET_CHAR  x2
+0x0E0A IS_CHAR_SCRIPT_CONTROLLED     x1     0x8EE4 NOT LOCATE_CHAR_DISTANCE.. x1
+0x0E47 IS_CHAR_FIGHTING              x1
+
+GTA3script aliases (section 3.11)
+0x0485 TRUE / RETURN_TRUE            x9     0x059A RETURN_FALSE               x1
+
+Rockstar debug opcodes (section 8)
+0x0662 WRITE_DEBUG                   x5     0x0663 WRITE_DEBUG_WITH_INT       x4
+
+core
+0x05E2 TASK_KILL_CHAR_ON_FOOT        x1     0x0792 CLEAR_CHAR_TASKS_IMM..     x2
+0x0AE1 GET_RANDOM_CHAR_IN_SPHERE     x2     0x0AB3 SET_CLEO_SHARED_VAR        x2
 ```
 
-`bin/MOBBNOBRAVEZA.cs` is 2553 bytes, 476 instructions, and starts with `00 00`
-(`NOP`) — proof that no `SCRIPT_NAME` header is emitted (§3.1).
+`bin/MOBBNOBRAVEZA.cs` is 3212 bytes, 544 instructions, uses locals `4@..30@`
+(`0@..3@` stay reserved for CLEO), and starts with `00 00` (`NOP`) — proof that
+no `SCRIPT_NAME` header is emitted (§3.1).
+
+The scan also asserts the absences, which is the half that catches a regression:
+`0x00A4 SCRIPT_NAME`, `0x0ACA PRINT_HELP_STRING`, `0x0AB0 IS_KEY_PRESSED`,
+`0x0E3D IS_KEY_JUST_PRESSED`, `0x05E5 TASK_SMART_FLEE_CHAR`,
+`0x0605 TASK_TURN_CHAR_TO_FACE_CHAR`, `0x060B TASK_SHAKE_FIST` and
+`0x060F TASK_LOOK_AT_CHAR` are all at **zero occurrences**.
 
 ## 7. Verifying the CLEO+ implementations before trusting them
 
@@ -639,3 +762,94 @@ inlined copy of it in the slot-reuse path).
 treatment: `RecruitDefenders` re-checks `DOES_CHAR_EXIST CANDIDATE` and
 `IS_CHAR_DEAD CANDIDATE` at the top of every frame of the recruit window, before
 the 3D distance test can run.
+
+## 8. Debug text that only exists for people who asked for it
+
+`0662 WRITE_DEBUG`, `0663 WRITE_DEBUG_WITH_INT` and `0664 WRITE_DEBUG_WITH_FLOAT`
+are Rockstar's own script-debugging opcodes. They are still in the retail game as
+no-ops — the Sanny Builder Library marks all three `is_nop: true` — and gta3sc
+already declares them in `config/gtasa/commands.xml`, so **no `--add-config` is
+needed for them**:
+
+```xml
+<Command ID="0x662" Name="WRITE_DEBUG">
+  <Args><Arg Type="STRING"/></Args>
+</Command>
+<Command ID="0x663" Name="WRITE_DEBUG_WITH_INT">
+  <Args><Arg Type="STRING"/><Arg Type="INT"/></Args>
+</Command>
+```
+
+Two mods re-activate them, and this is the whole reason a shipped mod can afford
+to be chatty:
+
+| Mod | Notes |
+|---|---|
+| [ScrDebug](https://www.mixmods.com.br/2017/06/sa-scrdebug/) (Deji) | Re-implements the pre-release debug system; also re-enables the `0735`/`0736` key checks that Rockstar used to hide cheats in `main.scm` (662 of them across main.scm + script.img) |
+| CLEO5 + the `DebugUtils` plugin | Needs `DebugUtils.General.LegacyDebugOpcodes = 1`; registers `0x0662/0x0663/0x0664` explicitly |
+
+Without either one installed the opcode costs a parameter skip and nothing else —
+no text, no log, no gameplay difference. That is exactly how the 2011 original
+could ship its `write_debug "НЕ БЕЙ ЖЕНЩИНУ 2, АВТОР IZERLI..."` credit line to
+end users (its `{$USE debug}` is Sanny's extension directive; gta3sc has no
+`{$...}` directives at all, and none is needed here).
+
+### 8.1 The `_WITH_INT` string is a label, not a format string
+
+From CLEO5's `cleo_plugins/DebugUtils/DebugUtils.cpp`, which follows Rockstar's
+original behaviour:
+
+```cpp
+// 0663=1, printint %1s% %2d%
+auto text  = CLEO_ReadStringOpcodeParam(thread);
+auto value = CLEO_GetIntOpcodeParam(thread);
+std::ostringstream ss;
+ss << text << ": " << value;
+CLEO_Log(eLogLevel::Debug, ss.str().c_str());
+```
+
+So `WRITE_DEBUG_WITH_INT "MenReact defenders" 3` prints `MenReact defenders: 3`.
+Writing a `%d` into the string would print the `%d` literally. Also note the
+guard at the top of every one of the three implementations:
+
+```cpp
+if (!CLEO_GetScriptDebugMode(thread)) { CLEO_SkipOpcodeParams(thread, 2); return OR_CONTINUE; }
+```
+
+— per-script debug mode, so the no-op path is explicit and cheap.
+
+### 8.2 gta3sc upper-cases string literals
+
+The emitted bytes for `WRITE_DEBUG "MenReact: victim detected"` are
+`MENREACT: VICTIM DETECTED`. GTA3script string literals are case-insensitive and
+the compiler normalises them to upper case, so what appears on screen is upper
+case regardless of how the source is written. Write the debug lines knowing that;
+there is no flag to preserve the case.
+
+### 8.3 You cannot pass a string to a subroutine
+
+A `GOSUB` argument lands in `0@..`, which belongs to the `CLEO_ARGS` block, and
+GTA3script has no string locals anyway — so a `GOSUB Debug "text"` helper is not
+expressible. The shape this script uses instead is a gate that answers in a local:
+
+```
+DebugGate:
+DBG_COUNT = 0
+BIT_AND OPTIONS OPT_DEBUG_TEXT ROLL
+IF NOT ROLL = 0
+    DBG_COUNT = 1
+ENDIF
+RETURN
+```
+
+```
+GOSUB DebugGate
+IF DBG_COUNT = 1
+    WRITE_DEBUG "MenReact: victim detected, recruiting witnesses"
+ENDIF
+```
+
+Two lines per site instead of one, but every line stays readable at its call
+site and `OPT_DEBUG_TEXT` can silence all of them at once — which matters because
+somebody running ScrDebug for an unrelated reason would otherwise get this mod's
+log mixed into theirs with no way to turn it off.

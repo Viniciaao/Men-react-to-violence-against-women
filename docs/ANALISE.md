@@ -225,8 +225,8 @@ recruta turbas durante missões.
 | B8 | Uma passada só, com `RECRUIT_WINDOW = 2.5 s` e `RECRUIT_STEP_DELAY = 120 ms` entre recrutamentos; a posição da vítima é **relida a cada quadro**. |
 | B10 | Filtros por pedtype (`PEDTYPE_COP`, `PEDTYPE_MISSION1..8`, `PEDTYPE_PLAYER1..PLAYER_UNUSED`), `IS_CHAR_SCRIPT_CONTROLLED` (CLEO+, peds criados/adotados por script), `IS_CHAR_ON_FOOT`, `IS_CHAR_IN_WATER`, `IS_CHAR_IN_AIR`, `IS_CHAR_DEAD`, `DOES_CHAR_EXIST`, vítima e jogador excluídos, e checagem contra os 5 slots já recrutados. |
 | B11 | O `are_any_chars_near_char` sumiu: o `0AE1` já resolve. |
-| B12 | O laço principal roda a cada quadro (`WAIT 0`) porque o hotkey é *edge-triggered*, mas tudo que é caro fica atrás de um portão de `SCAN_INTERVAL = 200 ms`; `WAIT 0` também dentro da janela de recrutamento (curta). |
-| B13 | **Deliberadamente não corrigido.** O requisito desta reescrita é não haver nenhum texto na tela. O feedback do mod é a própria turba. O estado (ligado/desligado e opções) é exposto nas variáveis compartilhadas CLEO 3100/3101 para quem quiser construir um aviso por fora. |
+| B12 | O laço principal é `WHILE TRUE` + `WAIT SCAN_INTERVAL` (200 ms). Não há mais hotkey, então nada precisa ser lido a cada frame — o `WAIT 0` só aparece dentro da janela de recrutamento, que dura no máximo 2.5 s (§3.11 do `docs/COMPILER.md` para o `WHILE TRUE`). |
+| B13 | **Deliberadamente não corrigido.** O requisito é não haver nenhum texto de *jogo* na tela: nenhuma mensagem, nenhuma help box. O feedback do mod continua sendo a própria turba, e o estado é exposto nas variáveis compartilhadas CLEO 3100/3101 para quem quiser construir um aviso por fora. O que existe agora é texto de **depuração** via `0662/0663`, que só aparece para quem tem ScrDebug ou o plugin DebugUtils do CLEO5 instalado e o bit `OPT_DEBUG_TEXT` ligado (§5.5). |
 | B14 | Bloco `CONST_INT`/`CONST_FLOAT` único no topo + campo de bits `OPTIONS_DEFAULT` para ligar/desligar features. |
 | B15 | Fim controlado com `TERMINATE_THIS_CUSTOM_SCRIPT` (gerado pelo gta3sc). `0A95` não é usado de propósito: o estado do mod é deliberadamente efêmero. |
 | B16 | `IS_PLAYER_PLAYING`, `DOES_CHAR_EXIST(player)`, `IS_CHAR_IN_ANY_CAR(player)`, **`IS_ON_MISSION`, `IS_ON_CUTSCENE`, `IS_ON_SCRIPTED_CUTSCENE`** (CLEO+) e liberação total da turba quando qualquer uma falha. |
@@ -248,11 +248,17 @@ Removido por requisito explícito (§5), e não por descuido:
 
 ### Extras que não existiam no original
 
-* **F10 liga/desliga em jogo**, com `0E3D IS_KEY_JUST_PRESSED` (CLEO+):
-  *edge-triggered*, sem debounce de software e sem repetir enquanto a tecla
-  continua pressionada.
-* **Variáveis compartilhadas CLEO** (`0AB3`) nos slots 3100 (ligado?) e 3101
-  (campo de bits de opções).
+* **Sempre ativo, sem nenhuma tecla.** Requisito explícito desta rodada: o mod
+  não registra atalho nenhum. A variável compartilhada 3100 é escrita com `1`
+  uma vez no boot e nunca mais lida pelo script; 3101 guarda o campo de bits de
+  opções, para que *outro* script possa ler ou escrever.
+* **`WHILE TRUE` / `RETURN_TRUE` / `RETURN_FALSE` / `IF GOSUB`.** A
+  verificação de covardia virou um predicado de verdade (`IsCoward`), que devolve
+  a resposta pelo *compare flag* em vez de por uma variável — e o laço principal
+  usa `BREAK`/`CONTINUE` em vez do idioma `label:` + `GOTO label` do script de
+  2011 (`docs/COMPILER.md` §3.11).
+* **Texto de depuração** com os opcodes originais da Rockstar (`0662`/`0663`),
+  que existem no jogo de varejo como *no-op* (§5.8).
 * **Filtro de covardes por dados do jogo** (`0EB1 GET_CHAR_STAT_ID` +
   `0EFA GET_CHAR_FEAR`): em vez de sortear o que um homem vai fazer, o mod
   pergunta ao jogo se aquele ped é do tipo que fugiria — e, se for, não faz
@@ -285,7 +291,9 @@ seções 1–3 sugere como "melhoria óbvia".
 
 ### 5.1 O que o mod pode e não pode fazer
 
-1. **Nenhum texto na tela.** Nenhuma mensagem, help box ou GXT.
+1. **Nenhum texto de jogo na tela.** Nenhuma mensagem, help box ou GXT.
+   Texto de *depuração* é permitido e foi pedido — só existe para quem instalou
+   ScrDebug ou o plugin DebugUtils do CLEO5 (§5.5).
 2. **Não mexer na IA nem nas decisões da vítima.** Ela não foge, não vira, não
    olha, não recebe task alguma.
 3. **Não mexer em pedestres que não vão agir contra o jogador.** Quem não ataca
@@ -342,7 +350,6 @@ Conferido no código-fonte do CLEO+ (`JuniorDjjr/CLEOPlus`, branch `main`, commi
 |---|---|---|
 | `0E1D IS_ON_MISSION` | A global que o `0180` seta é diferente de zero | Bloqueio total durante missões — o `$ONMISSION` que `.cs` não alcança |
 | `0E25` / `0EB7` | Cutscene ativa / cutscene de missão com bordas *widescreen* | Nada é recrutado nem mantido durante cutscenes |
-| `0E3D IS_KEY_JUST_PRESSED` | Tecla baixou **neste frame** (estado atual vs. estado no frame anterior) | F10 sem debounce e sem repetir com a tecla segurando; exige que o laço rode a cada frame |
 | `0E0A IS_CHAR_SCRIPT_CONTROLLED` | `m_nCreatedBy == 2`: um script **criou ou adotou** o ped | Pega peds de missão e de outros mods CLEO. **Não substitui** o teste de pedtype para personagens de missão que não foram criados por script |
 | `0E47 IS_CHAR_FIGHTING` | O ped tem `TASK_SIMPLE_FIGHT` (1016) na cadeia de tasks **deste frame** | Significa "está trocando socos agora", e não "está hostil". Um defensor perseguindo o jogador ou atirando nele não é "fighting"; quem já está numa luta corporal é — e é justamente esse que não devemos ter a IA sobrescrita |
 | `0E44 GET_CHAR_KILL_TARGET_CHAR` | O ponteiro de alvo lido de dentro da `TASK_COMPLEX_KILL_PED_ON_FOOT` (1000) que o `05E2` criou; `-1` se não houver alvo vivo | É a resposta exata para "ele ainda está na **nossa** task?", o que permite liberar sem tocar em ped que o jogo já reencaminhou |
@@ -354,6 +361,83 @@ Os dados de `0E47` e `0E44` vêm de um cache que o CLEO+ reconstrói **para todo
 os peds do pool, todo frame**, zerando os flags e percorrendo as cinco tasks
 primárias e as cinco secundárias com todas as subtasks. Não há valor obsoleto
 para contornar.
+
+### 5.5 Os três requisitos acrescentados depois
+
+Pedidos após a primeira entrega, e que mudam o desenho — não só o texto.
+
+**a) "Tire qualquer comando de tecla, quero o mod sempre ativo."**
+
+O `F10` e o `0E3D IS_KEY_JUST_PRESSED` saíram por completo, junto com as
+variáveis `ENABLED` e `LAST_SCAN`. Consequências que valem registro:
+
+* O laço principal deixou de precisar de resolução de frame, então o `WAIT 0`
+  virou `WAIT SCAN_INTERVAL` e o custo ocioso caiu de ~150 avaliações por
+  segundo para 5 (§6.2).
+* A variável compartilhada 3100 passou a ser **escrita** com `1` no boot, e
+  nunca lida pelo script. Ela continua lá porque é o contrato público do mod:
+  outro script que consultava 3100 para saber se o mod estava ligado continua
+  recebendo `1`.
+* O campo de bits de opções ganhou um terceiro bit, `OPT_DEBUG_TEXT`, e
+  `OPTIONS_DEFAULT` foi de `3` para `7` — depuração ligada por padrão, porque
+  quem não tem ScrDebug não a vê de qualquer forma.
+
+**b) "`RETURN_TRUE` e `RETURN_FALSE` são GTA3script válido."**
+
+Estavam certos, e a afirmação anterior desta documentação ("esses comandos não
+existem") era **errada** e foi retirada. Eles são aliases de `0x485
+IS_PC_VERSION` e `0x59A IS_AUSTRALIAN_GAME`, que no PC respondem sempre `true` e
+sempre `false`; GTA III e Vice City os tinham com esses nomes e o SA os perdeu, e
+o Junior_Djjr os restaurou declarando os aliases no XML de configuração
+([fórum MixMods t179](https://forum.mixmods.com.br/f16-utilidades/t179-gta3script-while-true-return_true-e-return_false)).
+
+O que mudou no código com eles disponíveis:
+
+* `IsCoward` virou um **predicado** que responde pelo *compare flag*
+  (`RETURN_TRUE` / `RETURN_FALSE`) e é chamado com `IF GOSUB`, em vez de escrever
+  um `0`/`1` numa variável que o chamador relê. São 8 caminhos verdadeiros e um
+  falso.
+* O laço principal é `WHILE TRUE` / `ENDWHILE` com `BREAK` e `CONTINUE`
+  (precisa de `-fbreak-continue`), substituindo o `MAIN_LOOP:` + `GOTO MAIN_LOOP`
+  que o script de 2011 era obrigado a usar.
+
+Detalhes de compilação em [`docs/COMPILER.md`](COMPILER.md) §3.11 — inclusive que
+o gta3sc aceita vários `<Command>` com o mesmo ID (é o que permite acrescentar o
+alias sem quebrar `IS_PC_VERSION`) e que o decompilador mostra o *primeiro* nome
+registrado, então `RETURN_TRUE` volta como `IS_PC_VERSION` no IR.
+
+**c) Textos de depuração na tela.**
+
+Implementados com os opcodes originais da Rockstar, `0662 WRITE_DEBUG` e
+`0663 WRITE_DEBUG_WITH_INT`, que existem no jogo de varejo como *no-op* — a SBL
+marca os três com `is_nop: true` — e já vêm declarados no `config/gtasa/commands.xml`
+do gta3sc, então **não precisaram entrar no `--add-config`**. É o mesmo mecanismo
+que o mod de 2011 usava para o crédito na tela, via `{$USE debug}` do Sanny.
+
+São 9 linhas, todas atrás do bit `OPT_DEBUG_TEXT`:
+
+| Onde | Linha |
+|---|---|
+| boot | `MenReact: loaded, always active, no hotkey` |
+| a cada 200 ms | `MenReact defenders: N` e `MenReact cooldown left s: N` |
+| missão rodando | `MenReact: idle, a mission is running` |
+| agressão detectada | `MenReact: victim detected, recruiting witnesses` |
+| sem slot livre | `MenReact: mob is full, witness left alone` |
+| recrutou | `MenReact recruited, defenders now: N` |
+| defensor expirou | `MenReact: defender timed out, released` |
+| liberação total | `MenReact released defenders: N` |
+
+Três coisas que a implementação forçou e estão documentadas em
+[`docs/COMPILER.md`](COMPILER.md) §8: a string do `_WITH_INT` é um **rótulo**
+(`"MenReact defenders" 3` vira `MenReact defenders: 3`), não uma string de
+formato; o gta3sc **caixa-alta** os literais; e **não dá para passar texto por
+`GOSUB`**, então cada linha é escrita no próprio ponto de chamada atrás de um
+portão (`DebugGate`) que responde em `DBG_COUNT`.
+
+Por isso não há log por candidato rejeitado no recrutamento: cada motivo
+precisaria de um rótulo próprio para ficar legível, e os dois contadores do
+`DebugStatus` já respondem à única pergunta que esse log serviria — "os filtros
+estão rejeitando todo mundo?".
 
 ---
 
@@ -392,16 +476,20 @@ Nos demais eixos de estabilidade do SA:
 
 | Situação | Custo |
 |---|---|
-| Ocioso (quase todo o tempo) | ~12 opcodes/frame: `WAIT 0`, `0E3D`, as cinco checagens de estado, dois *fast paths* de liberação (um comparador cada) e o portão de `SCAN_INTERVAL` |
-| A cada `SCAN_INTERVAL` (200 ms) | o portão passa: `GET_GAME_TIMER`, `GET_CHAR_COORDINATES` e o `0AE1` num raio de 3 m |
+| Ocioso (quase todo o tempo) | **5 opcodes a cada 200 ms**: `WAIT`, `GET_GAME_TIMER`, o `DebugStatus` desligado (2) e o *fast path* de `ReleaseExpiredDefenders` (1 comparador) |
+| Quando há defensor em campo | o `REPEAT` de 5 slots e, por slot vivo, uma subtração e uma comparação |
+| A cada agressão | `GET_CHAR_COORDINATES` e o `0AE1` num raio de 3 m |
 | Durante a janela (2,5 s por agressão) | `WAIT 0` com `0AE1` num raio de 25 m e a cadeia de filtros por candidato |
 
 Duas decisões de custo deliberadas:
 
-* **O laço principal é `WAIT 0`, não `WAIT 200`.** `IS_KEY_JUST_PRESSED` só é
-  verdadeiro no frame em que a tecla baixa; sondá-lo a cada 200 ms engoliria a
-  maioria das tecladas. Tudo que é caro ficou atrás do portão de `SCAN_INTERVAL`,
-  então o preço de rodar a cada frame é um opcode.
+* **O laço principal é `WAIT SCAN_INTERVAL` (200 ms), não `WAIT 0`.** Enquanto
+  existiu um hotkey *edge-triggered* o laço tinha que rodar a cada frame, porque
+  `IS_KEY_JUST_PRESSED` só é verdadeiro no frame em que a tecla baixa. Sem
+  hotkey não há nada que precise de resolução de frame: o `WAIT 0` sumiu do laço
+  principal e ficou só dentro da janela de recrutamento, que dura no máximo
+  2.5 s. Isso trocou ~150 avaliações por segundo por 5 — o mesmo mod, um quinto
+  do custo ocioso.
 * **Os filtros de recrutamento vão do mais barato ao mais caro.** Distância
   (`0EE4`, um opcode) e linha de visão descartam a maior parte de uma rua cheia
   antes que qualquer leitura de dados do ped (`0EB1`, `0EFA`) aconteça.
@@ -412,7 +500,10 @@ Duas decisões de custo deliberadas:
    slot cujo dono estourou o `DEFENDER_TIMEOUT` substituía o handle com a
    `TASK_KILL_CHAR_ON_FOOT` ainda ativa e nada mais para cronometrá-la: um homem
    perseguindo o jogador para sempre — exatamente o comportamento do original.
-   Agora o ocupante antigo é liberado antes.
+   Agora o ocupante antigo é liberado antes, e — porque não sobra nenhuma
+   variável local para guardar um handle — **toda leitura do ocupante antigo vai
+   direto a `DEFENDER_HANDLE[ROLL]`** em vez de passar por `DEFENDER` (29@), que
+   nesse momento segura a testemunha que está sendo recrutada (§6.3bis, item 1).
 2. **Liberação cega.** `CLEAR_CHAR_TASKS_IMMEDIATELY` era chamado em qualquer
    defensor expirado. Agora só em quem ainda tem o jogador como alvo de kill
    (`0E44`); se o jogo deu outra task ao ped, o script não interfere — o
@@ -425,6 +516,37 @@ Duas decisões de custo deliberadas:
    cutscenes e dentro do carro. Como os slots são preenchidos do índice 0 para
    cima e só são liberados em ordem, slot 0 vazio implica lista vazia — um
    comparador resolve.
+
+### 6.3bis Defeitos encontrados **nesta** rodada (sempre-ativo + ScrDebug)
+
+Três, todos introduzidos pela reescrita desta rodada e todos pegos antes de
+entregar — dois pela leitura do IR emitido, um pela leitura do próprio script:
+
+1. **Reuso de slot perdia a testemunha.** A primeira versão liberava o ocupante
+   antigo com `DEFENDER = DEFENDER_HANDLE[ROLL]` e depois relia
+   `DEFENDER = DEFENDER_HANDLE[ROLL]` para "unificar" o caminho do slot vazio com
+   o do reaproveitado. Só que entre as duas linhas o slot já tinha sido zerado,
+   então a releitura devolvia `SLOT_EMPTY` e o `IF DEFENDER = SLOT_EMPTY: GOTO
+   RECRUIT_NEXT_WITNESS` pulava o recrutamento **nos dois caminhos** — ou seja,
+   o mod nunca recrutava ninguém. Corrigido lendo o slot *inline* na liberação e
+   mantendo a testemunha em `DEFENDER` do começo ao fim.
+2. **`REPEAT` incrementa a própria variável — e a subrotina a sobrescrevia.**
+   `ReleaseOneDefender` usava `CURSOR` (24@) para o alvo de kill, e `CURSOR` é o
+   contador dos dois `REPEAT` que o chamam. O IR mostra o mecanismo:
+   `ADD_VAL_TO_INT_LVAR 24@ 1` no fim do corpo. Resultado:
+   `ReleaseAllDefenders` liberava **um** defensor e encerrava o laço, deixando
+   até quatro homens com `TASK_KILL_CHAR_ON_FOOT` permanente — o bug B5 do
+   original, reintroduzido por um detalhe de linguagem. Corrigido estacionando e
+   restaurando o contador em volta da chamada (`docs/COMPILER.md` §3.12).
+3. **Uma subrotina de debug que não imprimia nada.** `GOSUB Debug "texto"` não
+   existe em GTA3script: argumento de `GOSUB` cai em `0@..`, que pertence ao
+   bloco `CLEO_ARGS`, e não há variável local de string. A rotina "compilava" e
+   não escrevia linha nenhuma. Substituída por um portão (`DebugGate`) que
+   responde num inteiro, com o texto escrito no próprio ponto de chamada
+   (`docs/COMPILER.md` §8.3).
+
+O item 2 é o que justifica o `--verify` ser parte do fluxo e não uma checagem
+eventual: o defeito era invisível no fonte e evidente no bytecode.
 
 ### 6.4 O que continua sendo limitação
 
@@ -442,3 +564,13 @@ Duas decisões de custo deliberadas:
 * **Dependência dura do CLEO+.** Sem ele o script nem carrega. É deliberado:
   perguntar se um ped é covarde é impossível com CLEO puro, e o requisito 4 não
   tem como ser atendido de outra forma.
+* **Sem atalho de teclado, logo sem desligar em jogo.** Foi o pedido explícito
+  desta rodada ("tire qualquer comando de tecla, quero o mod sempre ativo"), e
+  não é reversível sem recompilar. O que resta é a variável compartilhada 3101:
+  outro script pode limpar `OPT_DEBUG_TEXT` para silenciar a depuração, mas o
+  recrutamento em si não tem bit de desligar — remover o `.cs` da pasta `cleo` é
+  o único jeito.
+* **O texto de depuração sai em caixa alta.** O gta3sc normaliza literais de
+  string para maiúsculas no bytecode, então `"MenReact defenders"` aparece como
+  `MENREACT DEFENDERS`. Não há flag que preserve a caixa
+  (`docs/COMPILER.md` §8.2).

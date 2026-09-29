@@ -43,8 +43,15 @@
 
     The official file is meant to *replace* config/gtasa/cleo.xml in a Sanny
     Builder installation, not to be added on top of gta3sc's.  Hence this
-    excerpt: only the ten commands this mod actually calls, plus the one enum it
-    needs, none of which collide with anything gta3sc already defines.
+    excerpt: only the ten commands this mod actually calls, the three
+    GTA3script aliases below, and the one enum it needs.
+
+    Note the difference between those two 0x485/0x59A entries and the ones this
+    file adds on purpose.  Here they are declared as *aliases*, with gta3sc's own
+    IS_PC_VERSION / IS_AUSTRALIAN_GAME left in place and still usable; a script
+    only gets RETURN_TRUE when it asks for RETURN_TRUE by name.  Loaded from the
+    official file they arrive as part of a 439-command block that also redeclares
+    every other CLEO opcode, which is not something to do by accident.
 
     ------------------------------------------------------------------------
     Format notes
@@ -119,6 +126,28 @@
   </Constants>
 
   <Commands>
+
+    <!-- ====================================================== GTA3script aliases
+
+    Junior_Djjr's "[GTA3script] WHILE TRUE, RETURN_TRUE e RETURN_FALSE"
+    (forum.mixmods.com.br, topic 179) re-introduces three names that GTA III and
+    Vice City had and San Andreas lost.  They are not new opcodes, only aliases
+    of two SA opcodes that always answer the same thing on PC:
+
+        0x485  IS_PC_VERSION        ->  TRUE / RETURN_TRUE    (always true)
+        0x59A  IS_AUSTRALIAN_GAME   ->  RETURN_FALSE          (always false)
+
+    Both original names keep working, so old scripts still compile.  gta3sc
+    accepts several <Command> entries sharing one ID - they become alternators -
+    which is what makes the aliases possible from an --add-config file.
+
+    They are conditions, and that is the whole point: RETURN_TRUE / RETURN_FALSE
+    set the script's compare flag and then RETURN hands it to the caller, which
+    reads it with "IF GOSUB Label".  This is how a boolean subroutine is written
+    in GTA3script, and the coward filter below uses it. -->
+    <Command ID="0x485" Name="TRUE"/>
+    <Command ID="0x485" Name="RETURN_TRUE"/>
+    <Command ID="0x59a" Name="RETURN_FALSE"/>
 
     <!-- ============================================================ game state -->
 
