@@ -17,13 +17,26 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$ROOT/src/MOBBNOBRAVEZA.sc"
 OUT="$ROOT/bin/MOBBNOBRAVEZA.cs"
 IR="$ROOT/build/MOBBNOBRAVEZA.ir2.txt"
+# CLEO+ opcode definitions.  gta3sc's own config/gtasa/cleo.xml stops at 0xB16,
+# so every 0Exx opcode this mod uses has to be declared for the compiler here.
+# --add-config resolves relative paths against the compiler's config dir, so
+# this one is passed as an absolute path.
+CLEOPLUS="$ROOT/config/cleoplus.xml"
 
 # Flags explained:
 #   --config=gtasa        San Andreas opcode table
+#   --add-config=...      append the CLEO+ opcode definitions (see $CLEOPLUS)
 #   --guesser             allow the language features the community had to guess
 #   --cs                  emit a CLEO .cs (headerless, -fcleo, local offsets)
 #   -fbreak-continue      allow BREAK inside REPEAT/WHILE
-FLAGS=(--config=gtasa --guesser --cs -fbreak-continue)
+#   -fno-entity-tracking  see the note in docs/COMPILER.md section 3.11: gta3sc's
+#                         entity checker does not propagate a type through array
+#                         elements, so storing ped handles in DEFENDER_HANDLE[5]
+#                         (which is the whole point of the slot table) makes every
+#                         later "expected variable of type CHAR but got NONE".
+#                         Compile-time only, zero effect on the emitted bytecode.
+FLAGS=(--config=gtasa "--add-config=$CLEOPLUS" --guesser --cs -fbreak-continue
+       -fno-entity-tracking)
 
 find_compiler() {
     if [ -n "${GTA3SC:-}" ] && [ -x "$GTA3SC" ]; then echo "$GTA3SC"; return; fi
@@ -33,7 +46,12 @@ find_compiler() {
 }
 
 build_tools() {
-    if [ ! -d "$ROOT/tools/gta3sc/.git" ]; then
+    if [ ! -f "$CLEOPLUS" ]; then
+    echo "error: $CLEOPLUS is missing; the CLEO+ opcodes cannot be resolved" >&2
+    exit 1
+fi
+
+if [ ! -d "$ROOT/tools/gta3sc/.git" ]; then
         echo ">> cloning thelink2012/gta3sc"
         mkdir -p "$ROOT/tools"
         git clone --depth 1 https://github.com/thelink2012/gta3sc.git "$ROOT/tools/gta3sc"
@@ -61,7 +79,7 @@ echo ">> built $(basename "$OUT") ($(stat -c%s "$OUT" 2>/dev/null || stat -f%z "
 
 if [ "${1:-}" = "--verify" ]; then
     echo ">> disassembling the result into build/MOBBNOBRAVEZA.ir2.txt"
-    "$CC_BIN" decompile "$OUT" --config=gtasa --cs -emit-ir2 \
+    "$CC_BIN" decompile "$OUT" --config=gtasa "--add-config=$CLEOPLUS" --cs -emit-ir2 \
         -fno-streamed-scripts -fno-switch -fno-arrays -fno-const -fno-skip-cutscene \
         -o "$IR"
     echo "   $(wc -l < "$IR") instructions"

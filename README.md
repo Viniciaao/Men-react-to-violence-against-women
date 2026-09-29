@@ -3,13 +3,22 @@
 Um mod **CLEO** para *GTA San Andreas* escrito em **GTA3script** e compilado com
 [`thelink2012/gta3sc`](https://github.com/thelink2012/gta3sc) no Linux.
 
-Quando o jogador bate numa mulher, os homens por perto reagem:
+Quando o jogador bate numa mulher, os homens por perto **que realmente fariam
+algo a respeito** partem para cima do jogador (`TASK_KILL_CHAR_ON_FOOT`).
+Mais nada acontece:
 
-* **~60 %** partem para cima do jogador (`TASK_KILL_CHAR_ON_FOOT`), com
-  precisão e "cérebro" ajustados para não desistirem no primeiro soco;
-* **~15 %** fogem;
-* **~25 %** só encaram e ameaçam (`TASK_SHAKE_FIST`);
-* a **própria vítima foge** do jogador em vez de ficar parada apanhando.
+* a **vítima nunca é tocada** — nenhuma task, nenhuma fuga, nenhuma mudança de
+  IA ou de decisão. Ela continua exatamente como o jogo a deixou;
+* um pedestre que **não agiria contra o jogador nunca é tocado** — covardes,
+  quem já está lutando, peds de missão e peds controlados por outro script não
+  são lidos duas vezes, não recebem task, não têm status alterado e não têm o
+  "cérebro" (decision maker) trocado. O jogo continua os controlando
+  normalmente;
+* **nenhum texto aparece na tela**. Sem mensagem, sem help box, sem GXT;
+* a única task que o script dá a alguém é `TASK_KILL_CHAR_ON_FOOT` contra o
+  jogador, e ela só é retirada (`CLEAR_CHAR_TASKS_IMMEDIATELY`) de quem **ainda
+  tem exatamente essa task** — se o jogo já tiver dado outra coisa para o ped
+  fazer, o script não interfere.
 
 É uma reescrita completa do mod *"Não bata em mulheres v2"* (Izerli, 2011,
 publicado no [MixMods](https://www.mixmods.com.br/2015/07/nao-bata-em-mulheres-v2/)).
@@ -22,12 +31,57 @@ compilação) e o que cada um virou aqui.
 ## Instalação
 
 1. Tenha o **CLEO 4.1+** instalado no GTA San Andreas.
-2. Copie `bin/MOBBNOBRAVEZA.cs` para a pasta `CLEO` do jogo.
-3. Jogue. **F10** liga/desliga o mod em tempo real.
+2. Instale o **CLEO+** — <https://github.com/JuniorDjjr/CLEOPlus>.
+3. Copie `bin/MOBBNOBRAVEZA.cs` para a pasta `CLEO` do jogo.
+4. Jogue. **F10** liga/desliga o mod em tempo real (silenciosamente).
 
-Só dois opcodes CLEO são usados (`0ACA PRINT_HELP_STRING` e
-`0AE1 GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE`), então qualquer CLEO 4
-moderna serve — não precisa de CLEO+.
+> ### CLEO+ é obrigatório, não opcional
+>
+> Sem o CLEO+ o script nem carrega: ele para no primeiro opcode desconhecido.
+> O motivo é que perguntar *"esse pedestre é covarde?"* é impossível com CLEO
+> puro — não existe opcode vanilla que leia a personalidade de um ped. O mod
+> precisa disso para **não** mexer com quem fugiria em vez de agir.
+
+Opcodes usados:
+
+| Origem | Opcodes |
+|---|---|
+| CLEO (vanilla) | `0AE1 GET_RANDOM_CHAR_IN_SPHERE_NO_SAVE_RECURSIVE`, `0AB3 SET_CLEO_SHARED_VAR`, `0B10/0B11 BIT_AND/BIT_OR` |
+| **CLEO+** | `0E1D IS_ON_MISSION`, `0E25 IS_ON_CUTSCENE`, `0EB7 IS_ON_SCRIPTED_CUTSCENE`, `0E3D IS_KEY_JUST_PRESSED`, `0E0A IS_CHAR_SCRIPT_CONTROLLED`, `0E47 IS_CHAR_FIGHTING`, `0EFA GET_CHAR_FEAR`, `0EB1 GET_CHAR_STAT_ID`, `0E44 GET_CHAR_KILL_TARGET_CHAR`, `0EE4 LOCATE_CHAR_DISTANCE_TO_CHAR` |
+
+Para outros mods / ferramentas: o estado é publicado em variáveis compartilhadas
+CLEO — **3100** = ligado (1) ou desligado (0), **3101** = campo de bits das
+opções ativas.
+
+## O filtro de covardes
+
+É a parte que o CLEO+ tornou possível, e usa os dados do próprio jogo em vez de
+sorteio:
+
+1. **`GET_CHAR_STAT_ID`** devolve a linha do ped em `data/pedstats.dat`. A
+   última coluna desse arquivo é *"Default decision maker"*, e o cabeçalho do
+   próprio jogo documenta o valor **4** como *"coward peds"* — os peds que o
+   decision maker `R_Weak` manda correr. Exatamente nove linhas têm esse valor:
+   `SENSIBLE_GUY`, `GEEK_GUY`, `SENSIBLE_GIRL`, `GEEK_GIRL`, `STEWARD`,
+   `SHOPPER`, `OLDSHOPPER`, `SKATER` e `COWARD`. Sete são masculinas e são
+   rejeitadas (as femininas nem chegam lá: `IS_CHAR_MALE` já as descartou).
+   O intervalo `14..25` é rejeitado inteiro de propósito — veja o comentário no
+   fonte se quiser recrutar também `STREET_GUY`/`SUIT_GUY`/`OLD_GUY`/`TOUGH_GUY`.
+2. **`GET_CHAR_FEAR`** devolve a coluna *Fear* do mesmo arquivo (0–100,
+   100 = "medo de tudo"). É o número que o jogo usa para decidir quão rápido um
+   ped foge. Pega as linhas que não são marcadas como covardes mas entram em
+   pânico — `TOURIST` tem fear 100 — e qualquer valor que um mod de peds ou uma
+   `pedstats.dat` editada tenha subido. `MAX_FEAR = 100` desliga esse segundo
+   teste e deixa só a blacklist por pedstat.
+
+Valores reais da `pedstats.dat` do SA, para referência:
+
+```
+PSYCHO 0 | COP 10 | FIREMAN 10 | TAXIDRIVER 16 | GANG1-9 20 | CRIMINAL 30
+TOUGH_GUY 30 | SUIT_GUY 35 | SUIT_GIRL 30 | OLD_GUY 40 | PROSTITUTE 40
+SPORTSFAN 40 | STEWARD 40 | STREET_GUY 45 | OLDSHOPPER 45 | BEACH_GUY 52
+GEEK_GUY 56 | TRAMP_MALE 60 | SENSIBLE_GUY 65 | COWARD 65 | TOURIST 100
+```
 
 ## Configuração
 
@@ -36,35 +90,29 @@ edite e recompile com `./build.sh`.
 
 | Constante | Padrão | O que faz |
 |---|---|---|
-| `OPTIONS_DEFAULT` | `27` | Campo de bits das features opcionais (veja abaixo) |
+| `OPTIONS_DEFAULT` | `3` | Campo de bits das features opcionais (veja abaixo) |
 | `ENABLED_ON_START` | `1` | Começa ligado |
-| `SCAN_INTERVAL` | `200` ms | Intervalo do laço principal (barato) |
+| `SCAN_INTERVAL` | `200` ms | Intervalo da varredura cara (o laço roda a cada frame) |
 | `VICTIM_SCAN_RADIUS` | `3.0` m | Raio em que se procura uma mulher agredida |
 | `DEFEND_RADIUS` | `25.0` m | Raio em que as testemunhas reagem |
-| `DEFEND_RADIUS_Z` | `8.0` m | Tolerância vertical desse raio |
+| `DEFEND_RADIUS_Z` | `8.0` m | Tolerância vertical do raio de linha de visão |
 | `MAX_DEFENDERS` | `5` | **Teto** de defensores simultâneos (o original não tinha) |
 | `RECRUIT_WINDOW` | `2500` ms | Por quanto tempo se procura testemunhas |
 | `RECRUIT_STEP_DELAY` | `120` ms | Pausa entre dois recrutamentos (anti-turba) |
 | `DEFENDER_TIMEOUT` | `45000` ms | Quando o defensor desiste e volta a ser ped comum |
-| `ATTACK_CHANCE` | `60` % | Probabilidade de atacar de verdade |
-| `FLEE_CHANCE` | `15` % | Probabilidade de fugir (o resto só ameaça) |
-| `DEFENDER_ACCURACY` | `55` | Precisão de quem ataca |
-| `DEFENDER_SENSE_RANGE` | `35.0` | Alcance de visão/audição do defensor |
+| `MAX_FEAR` | `70` | Fear máximo aceitável (`GET_CHAR_FEAR`); `100` desliga o teste |
+| `PEDSTAT_*` | — | Linhas da `pedstats.dat` rejeitadas como covardes |
 | `WAVE_COOLDOWN` | `8000` ms | Intervalo mínimo entre duas reações |
 | `VICTIM_COOLDOWN` | `25000` ms | Antes que a *mesma* mulher dispare de novo |
-| `VICTIM_FLEE_RADIUS` / `VICTIM_FLEE_TIME` | `30.0` / `6000` | Fuga da vítima |
 | `EYE_HEIGHT` | `0.7` | Altura do raio de linha de visão |
+| `KEY_F10` | `121` | Tecla de liga/desliga (virtual-key code) |
 
 Bits de `OPTIONS_DEFAULT` (some os valores e coloque o total):
 
 | Bit | Feature |
 |---|---|
-| `1` | `SHOW_HELP_TEXT` — mensagens na tela |
-| `2` | `IGNORE_WHEN_IN_CAR` — não age enquanto o jogador dirige |
-| `4` | `MELEE_ONLY` — ignora tiros/explosões, só socos e atropelamento |
-| `8` | `VICTIM_FLEES` — a vítima foge |
-| `16` | `USE_TOUGH_BRAIN` — defensores usam o decision maker *random tough* |
-| `32` | *(interno)* — há defensores ativos; não configure |
+| `1` | `IGNORE_WHEN_IN_CAR` — não age enquanto o jogador dirige |
+| `2` | `MELEE_ONLY` — ignora tiros/explosões, só socos e atropelamento |
 
 > O gta3sc não tem *constant folding*: não dá para escrever `IF CONST = 1`
 > (erro `could not match alternative`, porque não existe
@@ -87,9 +135,25 @@ compila o gta3sc sozinho.
 O equivalente em linha de comando:
 
 ```bash
-gta3sc src/MOBBNOBRAVEZA.sc --config=gtasa --guesser --cs -fbreak-continue \
+gta3sc src/MOBBNOBRAVEZA.sc --config=gtasa \
+      --add-config=config/cleoplus.xml \
+      --guesser --cs -fbreak-continue -fno-entity-tracking \
       -o bin/MOBBNOBRAVEZA.cs
 ```
+
+Os dois arquivos de suporte são parte do projeto, não detalhes do ambiente:
+
+* **[`config/cleoplus.xml`](config/cleoplus.xml)** — declara os 10 opcodes
+  CLEO+ para o compilador. O `config/gtasa/cleo.xml` que vem com o gta3sc para
+  em `0xB16`, então ele não conhece nenhum `0Exx`. Passado com `--add-config`
+  (caminho absoluto: o gta3sc resolve caminhos relativos a partir do diretório
+  de configuração *dele*).
+* **`-fno-entity-tracking`** — o verificador de tipos de entidade do gta3sc não
+  propaga o tipo através de elementos de array, e guardar handles de ped num
+  array (`DEFENDER_HANDLE[5]`) é justamente o design do mod. Sem a flag, todo
+  uso posterior de `DEFENDER` vira `expected variable of type CHAR but got NONE`.
+  É uma checagem só de compilação: não muda um byte do `.cs` gerado.
+  Detalhes em [`docs/COMPILER.md`](docs/COMPILER.md), §3.11.
 
 ### O compilador no Linux
 
@@ -107,10 +171,10 @@ custam tempo estão tratados lá: gerar `build/git-sha1.cpp` a partir de
 copiar `config/` para ao lado do executável.
 
 **[`docs/COMPILER.md`](docs/COMPILER.md)** documenta o build e, principalmente,
-as 10 diferenças de linguagem entre o GTA3script do gta3sc e o Sanny-flavour que
+as 11 diferenças de linguagem entre o GTA3script do gta3sc e o Sanny-flavour que
 os tutoriais de CLEO usam — incluindo o fato de que **variáveis globais são
 proibidas em `.cs`**, o que obriga a trocar `$PLAYER_ACTOR` por
-`GET_PLAYER_CHAR 0 ...` e torna `$ONMISSION` inacessível
+`GET_PLAYER_CHAR 0 ...`
 ([issue #104](https://github.com/thelink2012/gta3sc/issues/104) continua aberta).
 
 ## Layout do repositório
@@ -118,9 +182,11 @@ proibidas em `.cs`**, o que obriga a trocar `$PLAYER_ACTOR` por
 ```
 src/MOBBNOBRAVEZA.sc     o mod (GTA3script, fonte único)
 bin/MOBBNOBRAVEZA.cs     o mod compilado - é isto que vai para a pasta CLEO
+config/cleoplus.xml      definição dos opcodes CLEO+ para o gta3sc
 build.sh                 compila (e opcionalmente verifica) o mod
 docs/ANALISE.md          auditoria do mod original de 2011 + o que mudou
 docs/COMPILER.md         como o gta3sc foi construído e as pegadinhas da linguagem
+docs/original-mod-2011.txt  listagem do mod original, para referência
 tools/build-gta3sc.sh    build do compilador sem CMake
 tools/sbl.py             consulta a Sanny Builder Library (sa.json) por opcode
 tools/gta3sc/            clone do compilador       (ignorado pelo git)
@@ -131,32 +197,45 @@ build/                   *.o, *.ir2.txt             (ignorado pelo git)
 ## Como funciona por dentro
 
 ```
-laço principal (200 ms)
-  ├─ hotkey F10 (com debounce)
-  ├─ IS_PLAYER_PLAYING / GET_PLAYER_CHAR / IS_CHAR_IN_ANY_CAR
-  ├─ ReleaseExpiredDefenders            (só se houver defensor ativo)
-  ├─ rate limit global (WAVE_COOLDOWN)
+laço principal (WAIT 0 - roda todo frame; o caro fica atrás do portão de 200 ms)
+  ├─ PollHotkey                     (F10, edge-triggered, sem debounce)
+  ├─ IS_PLAYER_PLAYING / GET_PLAYER_CHAR
+  ├─ IS_ON_MISSION / IS_ON_CUTSCENE / IS_ON_SCRIPTED_CUTSCENE  → libera todos
+  ├─ IS_CHAR_IN_ANY_CAR (opcional) / ENABLED = 0               → libera todos
+  ├─ ReleaseExpiredDefenders        (fast path: 1 comparador se não há ninguém)
+  ├─ portão de SCAN_INTERVAL (200 ms) e rate limit (WAVE_COOLDOWN)
   └─ varre peds a 3 m do jogador com 0AE1
-       └─ mulher? foi danificada pelo jogador? (flags consumidas na hora)
-            ├─ MakeVictimReact          (ela foge)
-            └─ RecruitDefenders         (janela de 2,5 s, WAIT 0)
-                 └─ por testemunha: homem? a pé? não é policial/missão/player?
-                    dentro do raio? linha de visão livre? já não recrutado?
-                    tem slot livre?  → ReactDefender (dado: ataca/foge/ameaça)
+       └─ mulher? a pé? foi danificada pelo jogador? (flags consumidas na hora)
+            └─ RecruitDefenders     (janela de 2,5 s, WAIT 0)
+                 └─ por testemunha, do filtro mais barato ao mais caro:
+                    existe / vivo / homem / a pé / não está na água ou no ar
+                    → não é controlado por script (0E0A)
+                    → pedtype não é policial, missão ou player
+                    → está a DEFEND_RADIUS da vítima (0EE4)
+                    → linha de visão livre até ela
+                    → não está já lutando (0E47)
+                    → NÃO é covarde: pedstat (0EB1) e fear (0EFA)
+                    → ainda não foi recrutado, e há slot livre
+                    → TASK_KILL_CHAR_ON_FOOT (nada mais)
 ```
+
+A ordem dos filtros não é estética: distância e linha de visão descartam a maior
+parte de uma rua cheia por um opcode cada, e os testes de personalidade (que
+leem dados do ped) só rodam em quem sobrou.
 
 Os handles vêm sempre da variante `*_NO_SAVE` do `0AE1`, ou seja, o script
 **nunca é dono de nenhuma referência** de ped: não há o que vazar e não há
 `MARK_CHAR_AS_NO_LONGER_NEEDED` para esquecer. Nenhum `CGroup` é criado (o
 original criava um por agressão e nunca o removia).
 
-## Limitação conhecida
+## Missões
 
-Sem `$ONMISSION` (globais são ilegais em `.cs` no gta3sc) não dá para bloquear
-o mod durante missões de forma absoluta. A proteção é por heurística: pedtypes
-de missão (`PEDTYPE_MISSION1..8`) são ignorados, policiais são ignorados, e o
-mod só age com o jogador vivo, no controle e a pé. Um bloqueio total exigiria
-CLEO+ (`0E1D: is_on_mission`), que o gta3sc ainda não conhece.
+`0E1D IS_ON_MISSION` (CLEO+) lê a global que o `0180` seta — exatamente o
+`$ONMISSION` que um script `.cs` compilado pelo gta3sc **não consegue** acessar,
+porque globais são ilegais em custom scripts. Com ele o mod fica totalmente
+bloqueado durante missões, e não por heurística. `IS_CHAR_SCRIPT_CONTROLLED`
+(`0E0A`) cobre o resto: peds criados por outros mods CLEO ou por qualquer script
+não são tocados.
 
 ## Créditos
 
@@ -164,5 +243,6 @@ CLEO+ (`0E1D: is_on_mission`), que o gta3sc ainda não conhece.
   publicado no MixMods. Este repositório é uma reimplementação independente,
   feita a partir da análise do script descompilado.
 * Compilador: **Denilson "thelink2012" Amorim** — [gta3sc](https://github.com/thelink2012/gta3sc) (MIT).
+* Opcodes estendidos: **JuniorDjjr** — [CLEO+](https://github.com/JuniorDjjr/CLEOPlus).
 * Referência de opcodes: **Sanny Builder Library** —
   [sannybuilder/library](https://github.com/sannybuilder/library).

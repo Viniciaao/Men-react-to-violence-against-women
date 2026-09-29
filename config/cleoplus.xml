@@ -1,0 +1,137 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+    CLEO+ opcode definitions for thelink2012/gta3sc.
+
+    gta3sc ships config/gtasa/cleo.xml, but that file stops at 0xB16 (BIT_SHL)
+    and therefore knows nothing about CLEO+.  This file is appended to the
+    configuration with
+
+        gta3sc src/MOBBNOBRAVEZA.sc - -config=gtasa - -guesser - -cs \
+               - -add-config=config/cleoplus.xml ...
+
+    (build.sh already does that; see ./build.sh -h).
+
+    Names, argument counts and argument types were taken from the Sanny Builder
+    Library (https://library.sannybuilder.com, sa/sa.json, extension "CLEO+"),
+    which is generated from the CLEO+ SDK headers.  Argument types are limited
+    to what gta3sc understands (INT/FLOAT/PARAM/LABEL/CONSTANT/TEXT_LABEL*/
+    STRING): SBL types such as "KeyCode", "PedStat" and "PedState" are plain
+    integers in the compiled script, so they are declared INT here and the
+    script uses its own CONST_INT names instead of enum identifiers.
+
+    Conditions need no extra markup: gta3sc decides "is this a condition?"
+    from the position in the source (inside IF / IF NOT), not from the XML.
+
+    Every opcode below is a CLEO+ extension, so the compiled script REQUIRES
+    CLEO+ in game (CLEO 4 alone will fail to load it with an unknown-opcode
+    error).
+-->
+<GTA3Script>
+  <Commands>
+
+    <!-- ============================================================ game state -->
+
+    <!-- bool IS_ON_MISSION()
+         True while the "on mission" global set by 0180 is non-zero.
+         Plain CLEO scripts cannot read $ONMISSION (gta3sc has no DIM_VAR and
+         custom scripts get their own local pool), so this is the only way to
+         know that a mission is running. -->
+    <Command ID="0xe1d" Name="IS_ON_MISSION"/>
+
+    <!-- bool IS_ON_CUTSCENE()  - true while a cutscene is active (02E7) -->
+    <Command ID="0xe25" Name="IS_ON_CUTSCENE"/>
+
+    <!-- bool IS_ON_SCRIPTED_CUTSCENE()
+         True while a scripted mission cutscene plays (widescreen borders on). -->
+    <Command ID="0xeb7" Name="IS_ON_SCRIPTED_CUTSCENE"/>
+
+    <!-- ============================================================ input -->
+
+    <!-- bool IS_KEY_JUST_PRESSED(KeyCode keyCode)
+         Edge triggered: only true on the frame the key went down, so a hotkey
+         needs no software debounce and cannot repeat while the key is held. -->
+    <Command ID="0xe3d" Name="IS_KEY_JUST_PRESSED">
+      <Args>
+        <Arg Type="INT" Desc="Virtual-key code"/>
+      </Args>
+    </Command>
+
+    <!-- ============================================================ ped queries -->
+
+    <!-- bool IS_CHAR_SCRIPT_CONTROLLED(Char self)
+         True for peds the game or another script owns (mission peds, peds from
+         other CLEO mods, group members under script control).  Used to leave
+         those peds strictly alone. -->
+    <Command ID="0xe0a" Name="IS_CHAR_SCRIPT_CONTROLLED">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+      </Args>
+    </Command>
+
+    <!-- bool IS_CHAR_FIGHTING(Char self)
+         True while the ped is already in a fight.  Such a ped is already being
+         driven by the game's own combat AI, so recruiting it would only
+         overwrite a decision the game made by itself. -->
+    <Command ID="0xe47" Name="IS_CHAR_FIGHTING">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+      </Args>
+    </Command>
+
+    <!-- int GET_CHAR_FEAR(Char self) -> int fear
+         The Fear column of data/pedstats.dat (0..100, 100 = scared of
+         everything).  This is the number the game itself uses to decide how
+         quickly a ped runs away, which makes it the right "is he a coward?"
+         test.  Vanilla values, for reference:
+             PSYCHO 0 | COP 10 | FIREMAN 10 | TAXIDRIVER 16 | GANG1-9 20
+             TOUGH_GUY 30 | SUIT_GUY 35 | CRIMINAL 30 | SHOPPER 30
+             OLD_GUY 40 | PROSTITUTE 40 | SPORTSFAN 40 | STEWARD 40
+             STREET_GUY 45 | OLDSHOPPER 45 | BEACH_GUY 52 | GEEK_GUY 56
+             TRAMP_MALE 60 | SENSIBLE_GUY 65 | COWARD 65 | TOURIST 100 -->
+    <Command ID="0xefa" Name="GET_CHAR_FEAR">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+        <Arg Type="INT" Out="true" Desc="Fear 0..100"/>
+      </Args>
+    </Command>
+
+    <!-- PedStat GET_CHAR_STAT_ID(Char self) -> int pedStat
+         The pedstat row of the ped, i.e. its index in data/pedstats.dat
+         (STAT_PLAYER 0 ... STAT_STD_MISSION 41, STAT_COWARD 42).  Every SA
+         ped type maps to exactly one row, so this identifies the ped's
+         personality precisely - unlike GET_PED_TYPE, which only separates
+         civilian / cop / gang / mission. -->
+    <Command ID="0xeb1" Name="GET_CHAR_STAT_ID">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+        <Arg Type="INT" Out="true" Desc="pedstats.dat row"/>
+      </Args>
+    </Command>
+
+    <!-- Char GET_CHAR_KILL_TARGET_CHAR(Char self) -> Char killTarget
+         The ped this character's TASK_KILL_CHAR_ON_FOOT was issued against
+         (0 when it has none).  Used to find out whether a defender is still
+         running *our* task before touching it again: if the game gave him
+         something else to do in the meantime, we do not clear it. -->
+    <Command ID="0xe44" Name="GET_CHAR_KILL_TARGET_CHAR">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+        <Arg Type="INT" Out="true" Entity="CHAR"/>
+      </Args>
+    </Command>
+
+    <!-- ============================================================ geometry -->
+
+    <!-- bool LOCATE_CHAR_DISTANCE_TO_CHAR(Char self, Char character, float radius)
+         3D distance test between two peds with a single radius argument,
+         instead of the six-argument LOCATE_CHAR_ANY_MEANS_CHAR_3D. -->
+    <Command ID="0xee4" Name="LOCATE_CHAR_DISTANCE_TO_CHAR">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+        <Arg Type="INT" Entity="CHAR"/>
+        <Arg Type="FLOAT" Desc="Radius"/>
+      </Args>
+    </Command>
+
+  </Commands>
+</GTA3Script>
