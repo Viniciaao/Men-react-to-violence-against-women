@@ -11,22 +11,113 @@
 
     (build.sh already does that; see ./build.sh -h).
 
-    Names, argument counts and argument types were taken from the Sanny Builder
-    Library (https://library.sannybuilder.com, sa/sa.json, extension "CLEO+"),
-    which is generated from the CLEO+ SDK headers.  Argument types are limited
-    to what gta3sc understands (INT/FLOAT/PARAM/LABEL/CONSTANT/TEXT_LABEL*/
-    STRING): SBL types such as "KeyCode", "PedStat" and "PedState" are plain
-    integers in the compiled script, so they are declared INT here and the
-    script uses its own CONST_INT names instead of enum identifiers.
+    ------------------------------------------------------------------------
+    Provenance
+    ------------------------------------------------------------------------
+    CLEO+ itself ships a gta3sc file, "(for developers)/gta3script/cleo.xml"
+    (JuniorDjjr/CLEOPlus, branch main, commit d04732be7251).  Every command
+    below was compared against it and is byte-for-byte equivalent - same ID,
+    same argument order, same Type/Entity/Out/Enum attributes - so this file is
+    a verified excerpt, not a guess.  Argument directions and counts were
+    additionally cross-checked against the Sanny Builder Library
+    (sa/sa.json, extension "CLEO+") and against the CLEO+ implementations
+    themselves (docs/COMPILER.md section 7).
 
-    Conditions need no extra markup: gta3sc decides "is this a condition?"
-    from the position in the source (inside IF / IF NOT), not from the XML.
+    The <Enum Name="PEDSTAT"> block is copied verbatim from that official file,
+    which is where the PEDSTAT_* names the script uses come from.
+
+    ------------------------------------------------------------------------
+    Why the official file is NOT used directly
+    ------------------------------------------------------------------------
+    It cannot be passed to - -add-config as it is.  - -add-config appends, and
+    the official file is a 439-command superset of gta3sc's own cleo.xml, so
+    119 IDs would be declared twice and two *vanilla San Andreas* opcodes would
+    be silently redefined out from under the compiler:
+
+        0x485  gta3sc: IS_PC_VERSION        CLEO+: RETURN_TRUE
+        0x59A  gta3sc: IS_AUSTRALIAN_GAME   CLEO+: RETURN_FALSE
+
+    Its <Enum Name="BONE"> also disagrees with gta3sc's constants.xml on two
+    values (BONE_L_BREAST 46 vs 302, BONE_R_BREAST 45 vs 301), and enums are
+    merged by name, so CLEO+'s numbers would win.
+
+    The official file is meant to *replace* config/gtasa/cleo.xml in a Sanny
+    Builder installation, not to be added on top of gta3sc's.  Hence this
+    excerpt: only the ten commands this mod actually calls, plus the one enum it
+    needs, none of which collide with anything gta3sc already defines.
+
+    ------------------------------------------------------------------------
+    Format notes
+    ------------------------------------------------------------------------
+    Argument types are limited to what gta3sc understands (INT FLOAT PARAM LABEL
+    CONSTANT TEXT_LABEL TEXT_LABEL16 TEXT_LABEL32 STRING): Sanny Builder Library
+    types such as "KeyCode", "PedStat" and "PedState" are plain integers in the
+    compiled script, so they appear here as INT, optionally with Enum= to bind
+    the official names.
+
+    Conditions need no extra markup: gta3sc decides "is this a condition?" from
+    the position in the source (inside IF / IF NOT), not from the XML.  An
+    inverted use is encoded by the compiler as opcode | 0x8000.
 
     Every opcode below is a CLEO+ extension, so the compiled script REQUIRES
     CLEO+ in game (CLEO 4 alone will fail to load it with an unknown-opcode
     error).
--->
-<GTA3Script>
+--><GTA3Script>
+  <Constants>
+
+    <!-- data/pedstats.dat rows, 0-based, in file order.  Copied verbatim from
+         the official CLEO+ gta3sc file.  Global="true" is what makes the names
+         usable anywhere in a script instead of only in the argument that binds
+         the enum - and, conversely, what makes a script's own
+         "CONST_INT PEDSTAT_COWARD 42" fail with "user constant exists already
+         as a string constant". -->
+    <Enum Name="PEDSTAT" Global="true">
+    <Constant Name="PEDSTAT_PLAYER"/>
+    <Constant Name="PEDSTAT_COP"/>
+    <Constant Name="PEDSTAT_MEDIC"/>
+    <Constant Name="PEDSTAT_FIREMAN"/>
+    <Constant Name="PEDSTAT_GANG1"/>
+    <Constant Name="PEDSTAT_GANG2"/>
+    <Constant Name="PEDSTAT_GANG3"/>
+    <Constant Name="PEDSTAT_GANG4"/>
+    <Constant Name="PEDSTAT_GANG5"/>
+    <Constant Name="PEDSTAT_GANG6"/>
+    <Constant Name="PEDSTAT_GANG7"/>
+    <Constant Name="PEDSTAT_GANG8"/>
+    <Constant Name="PEDSTAT_GANG9"/>
+    <Constant Name="PEDSTAT_GANG10"/>
+    <Constant Name="PEDSTAT_STREET_GUY"/>
+    <Constant Name="PEDSTAT_SUIT_GUY"/>
+    <Constant Name="PEDSTAT_SENSIBLE_GUY"/>
+    <Constant Name="PEDSTAT_GEEK_GUY"/>
+    <Constant Name="PEDSTAT_OLD_GUY"/>
+    <Constant Name="PEDSTAT_TOUGH_GUY"/>
+    <Constant Name="PEDSTAT_STREET_GIRL"/>
+    <Constant Name="PEDSTAT_SUIT_GIRL"/>
+    <Constant Name="PEDSTAT_SENSIBLE_GIRL"/>
+    <Constant Name="PEDSTAT_GEEK_GIRL"/>
+    <Constant Name="PEDSTAT_OLD_GIRL"/>
+    <Constant Name="PEDSTAT_TOUGH_GIRL"/>
+    <Constant Name="PEDSTAT_TRAMP_MALE"/>
+    <Constant Name="PEDSTAT_TRAMP_FEMALE"/>
+    <Constant Name="PEDSTAT_TOURIST"/>
+    <Constant Name="PEDSTAT_PROSTITUTE"/>
+    <Constant Name="PEDSTAT_CRIMINAL"/>
+    <Constant Name="PEDSTAT_BUSKER"/>
+    <Constant Name="PEDSTAT_TAXIDRIVER"/>
+    <Constant Name="PEDSTAT_PSYCHO"/>
+    <Constant Name="PEDSTAT_STEWARD"/>
+    <Constant Name="PEDSTAT_SPORTSFAN"/>
+    <Constant Name="PEDSTAT_SHOPPER"/>
+    <Constant Name="PEDSTAT_OLDSHOPPER"/>
+    <Constant Name="PEDSTAT_BEACH_GUY"/>
+    <Constant Name="PEDSTAT_BEACH_GIRL"/>
+    <Constant Name="PEDSTAT_SKATER"/>
+    <Constant Name="PEDSTAT_STD_MISSION"/>
+    <Constant Name="PEDSTAT_COWARD"/>
+    </Enum>
+  </Constants>
+
   <Commands>
 
     <!-- ============================================================ game state -->
@@ -52,16 +143,19 @@
          needs no software debounce and cannot repeat while the key is held. -->
     <Command ID="0xe3d" Name="IS_KEY_JUST_PRESSED">
       <Args>
-        <Arg Type="INT" Desc="Virtual-key code"/>
+        <Arg Type="INT" Enum="WIN32_VK"/>
       </Args>
     </Command>
 
     <!-- ============================================================ ped queries -->
 
     <!-- bool IS_CHAR_SCRIPT_CONTROLLED(Char self)
-         True for peds the game or another script owns (mission peds, peds from
-         other CLEO mods, group members under script control).  Used to leave
-         those peds strictly alone. -->
+         CLEO+ implements this as "ped->m_nCreatedBy == 2" (CPed +0x484), which
+         is the same state its own MARK_CHAR_AS_NEEDED writes.  So it is true for
+         a ped that a script created or adopted - mission peds and peds spawned
+         by other CLEO mods - and false for an ordinary random world ped.  Used
+         here to leave script-owned peds strictly alone.  (Whatever is left of
+         the mission ped types is caught separately by GET_PED_TYPE.) -->
     <Command ID="0xe0a" Name="IS_CHAR_SCRIPT_CONTROLLED">
       <Args>
         <Arg Type="INT" Entity="CHAR"/>
@@ -91,7 +185,7 @@
     <Command ID="0xefa" Name="GET_CHAR_FEAR">
       <Args>
         <Arg Type="INT" Entity="CHAR"/>
-        <Arg Type="INT" Out="true" Desc="Fear 0..100"/>
+        <Arg Type="INT" Out="true"/>
       </Args>
     </Command>
 
@@ -104,7 +198,7 @@
     <Command ID="0xeb1" Name="GET_CHAR_STAT_ID">
       <Args>
         <Arg Type="INT" Entity="CHAR"/>
-        <Arg Type="INT" Out="true" Desc="pedstats.dat row"/>
+        <Arg Type="INT" Enum="PEDSTAT" Out="true"/>
       </Args>
     </Command>
 

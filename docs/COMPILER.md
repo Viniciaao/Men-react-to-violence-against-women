@@ -202,16 +202,38 @@ Sanny Builder Library `enums.json`).
 Likewise `CONST_INT TOGGLE_KEY VK_F10` fails (`CONST_INT` only accepts an
 integer literal), so `IS_KEY_PRESSED VK_F10` was written directly.
 
-That worked only because `0AB0 IS_KEY_PRESSED` binds `Enum="WIN32_VK"`. The
-CLEO+ replacement used now, `0E3D IS_KEY_JUST_PRESSED`, is declared by
-`config/cleoplus.xml` with a bare `INT` argument, and `WIN32_VK` is not defined
-anywhere in gta3sc's `config/gtasa/` — so the enum member would resolve to
-nothing. Hence `CONST_INT KEY_F10 121`. Two more facts about enums that matter
-when writing an `--add-config` file:
+That worked only because `0AB0 IS_KEY_PRESSED` binds `Enum="WIN32_VK"`, and the
+CLEO+ replacement behaves the same way — but only if the new declaration binds
+the enum too. `WIN32_VK` *is* defined in gta3sc's `config/gtasa/cleo.xml` (line
+4, `VK_F10` at line 107), yet this fails:
+
+```
+<Arg Type="INT" Desc="Virtual-key code"/>          <!-- enum not bound -->
+IF IS_KEY_JUST_PRESSED VK_F10   ->  error: no variable with this name
+```
+
+```
+<Arg Type="INT" Enum="WIN32_VK"/>                  <!-- official declaration -->
+IF IS_KEY_JUST_PRESSED VK_F10   ->  emits 121
+```
+
+So an enum that exists in the configuration is still only visible **in the
+argument that binds it**; everywhere else the name is parsed as a variable. That
+is the whole of §3.5, and it is why `config/cleoplus.xml` copies the official
+`Enum=` attributes instead of simplifying them to `INT`.
+
+Three more facts about enums that matter when writing an `--add-config` file:
 
 * an `<Arg Enum="Foo"/>` whose enum `Foo` is not defined in the loaded XML makes
   every use of that argument fail to match, so a new command should only bind an
-  enum it also defines;
+  enum that exists — either in gta3sc's own files or in the added one, which is
+  why `config/cleoplus.xml` carries the official `<Enum Name="PEDSTAT">` block;
+* `<Enum Global="true">` is different: those names become usable anywhere in the
+  script, not only in the binding argument. `PEDSTAT` is declared global by
+  CLEO+, which is what lets the script write `IF CURSOR = PEDSTAT_COWARD` after a
+  plain `GET_CHAR_STAT_ID`. It is also what makes a home-made
+  `CONST_INT PEDSTAT_COWARD 42` fail with `user constant exists already as a
+  string constant` — the enum won, and the enum is right;
 * `Enum` values are matched **case-insensitively** and only where the XML says
   so — the Sanny Builder Library names an argument type (`KeyCode`, `PedStat`,
   `PedState`) that gta3sc's `xml_to_argtype` does not accept at all
@@ -372,6 +394,41 @@ any `0Exx` opcode out of the box. Everything CLEO+ adds has to be declared in an
 extra XML file passed with `--add-config`; [`config/cleoplus.xml`](../config/cleoplus.xml)
 is that file for this mod.
 
+### 5.1 CLEO+ already ships one — and it cannot be used as-is
+
+`(for developers)/gta3script/cleo.xml` in `JuniorDjjr/CLEOPlus` (branch `main`,
+commit `d04732be7251`) is the upstream definition file, 439 commands and 28
+enums. Every command in `config/cleoplus.xml` was compared against it and is
+equivalent — same ID, same argument order, same `Type`/`Entity`/`Out`/`Enum`
+attributes — so this repo's file is a verified excerpt rather than a guess. It
+also confirms all ten IDs independently of the Sanny Builder Library.
+
+Passing the official file to `--add-config` does **not** work, because
+`--add-config` *appends* to a configuration that already contains gta3sc's own
+`cleo.xml` and `commands.xml`:
+
+| Problem | Detail |
+|---|---|
+| 119 duplicate IDs | the official file is a superset of gta3sc's `cleo.xml` — all 119 of its commands are declared again (names match, so this part is harmless) |
+| **2 vanilla opcodes redefined** | `0x485` is `IS_PC_VERSION` in `commands.xml` and `RETURN_TRUE` in CLEO+; `0x59A` is `IS_AUSTRALIAN_GAME` and `RETURN_FALSE`. A script using either would silently compile to the wrong opcode |
+| 1 enum silently rewritten | `BONE` exists in both; `BONE_L_BREAST` is 46 in gta3sc and 302 in CLEO+, `BONE_R_BREAST` 45 vs 301. Enums are merged by name, so whichever file loads last wins |
+
+The official file is meant to *replace* `gtasa/cleo.xml` in a Sanny Builder
+installation (that is literally what its accompanying
+`CLEO+ gta3sc xml.txt` instructs), not to be layered on top of gta3sc's. Hence
+the excerpt: only the ten commands this mod calls plus the `PEDSTAT` enum it
+needs, none of which collide with anything already defined.
+
+The upstream file is also where the task ids come from, should a script ever want
+`0E42 IS_CHAR_DOING_TASK_ID`:
+
+```
+TASK_COMPLEX_KILL_PED_ON_FOOT  1000   TASK_SIMPLE_FIGHT  1016
+TASK_COMPLEX_FLEE_ENTITY        909   TASK_NONE           200
+```
+
+### 5.2 Format
+
 The format is the same as the shipped configs:
 
 ```xml
@@ -412,8 +469,8 @@ Points that are easy to get wrong:
 
 The names, argument counts and argument directions were taken from the Sanny
 Builder Library (`sa/sa.json`, `extension: "CLEO+"`), which is generated from the
-CLEO+ SDK headers, and every one of them was verified in the compiled bytecode
-(§6).
+CLEO+ SDK headers, then checked against the upstream gta3sc file (§5.1), and
+every one of them was verified in the compiled bytecode (§6).
 
 ## 6. Verifying that the opcodes really landed
 
@@ -502,3 +559,83 @@ just survived `DOES_CHAR_EXIST` + `IS_CHAR_DEAD`, with no `WAIT` between the
 check and the call — there is no window in which the pool can reclaim the ped.
 This is also why the slot table releases a defender through `DOES_CHAR_EXIST`
 before `GET_CHAR_KILL_TARGET_CHAR` touches him.
+
+### 7.1 The AI queries read a per-frame cache, and what that means
+
+`IS_CHAR_FIGHTING`, `IS_CHAR_DOING_TASK_ID` and `GET_CHAR_KILL_TARGET_CHAR` do
+not ask the game's task system anything. They read `PedExtended`, CLEO+'s
+per-ped side data (`CLEOPlus/PedExtendedData.h`), which is rebuilt for **every
+ped in the pool, every frame** (`CLEOPlus/CLEOPlus.cpp`, around line 1000):
+
+```cpp
+xdata.aiFlagsIntValue = 0;                    // all AI flags reset
+for (i = 0; i < 5; i++)                       // primary task slots
+    for (task = taskMgr->m_aPrimaryTasks[i]; task; task = task->GetSubTask())
+        CacheOnePedTask(ped, xdata, activeTaskIndex, task, false);
+for (i = 0; i < 5; i++)                       // secondary task slots
+    ...
+```
+
+and `CacheOnePedTask` (`CLEOPlus/Intelligence.cpp`) walks the whole task chain,
+so a subtask counts too:
+
+```cpp
+case TASK_COMPLEX_KILL_PED_ON_FOOT:           // 1000, what 05E2 creates
+    taskOffsetForKillTargetPed = 16;  break;
+case TASK_SIMPLE_FIGHT:                       // 1016
+    xdata.aiFlags.bFighting = true;   break;
+...
+if (taskOffsetForKillTargetPed > 0) {
+    xdata.aiFlags.bKillingSomething = true;
+    xdata.killTargetPed = *(CEntity**)(task + taskOffsetForKillTargetPed);
+}
+```
+
+Three consequences this script is written around:
+
+* **`GET_CHAR_KILL_TARGET_CHAR` is a real answer to "is he still on our task?".**
+  `killTargetPed` is read out of the `TASK_COMPLEX_KILL_PED_ON_FOOT` struct that
+  `05E2` created, at offset 16. When the task is gone the value stops being
+  refreshed, and the opcode returns `-1` unless the entity pointer is still a
+  live ped — so the comparison against the player fails and the script does not
+  clear tasks the game has since replaced. Exactly the intended behaviour.
+* **`IS_CHAR_FIGHTING` means "in melee right now", not "hostile".** `bFighting`
+  comes from `TASK_SIMPLE_FIGHT` (1016), the swing/punch subtask, and the flags
+  are zeroed every frame. A defender chasing the player or shooting at him is
+  *not* "fighting" by this definition; a ped already trading punches with
+  somebody is. As a recruit filter that is the useful reading: whoever is already
+  in a fistfight is left to the game's own combat AI.
+* **The two are refreshed once per frame for the whole pool**, so there is no
+  staleness to poll around and no reason to cache them in locals.
+
+The same cache is what makes `GET_CHAR_KILL_TARGET_CHAR` safe against a target
+ped that has since been deleted: the opcode checks `entity->m_nType ==
+ENTITY_TYPE_PED` and converts through `CPools::GetPedRef`, returning `-1` when
+the pointer is no longer a ped in the pool.
+
+### 7.2 Null-check discipline across the CLEO+ opcodes used here
+
+The implementations are not uniform about validating the handle:
+
+| Opcode | Null check? | Note |
+|---|---|---|
+| `0E0A IS_CHAR_SCRIPT_CONTROLLED` | **yes** (`ped != nullptr && ped->m_nCreatedBy == 2`) | safe with a stale handle |
+| `0E47 IS_CHAR_FIGHTING` | no (`extData.Get(ped)` on a possibly null ped) | needs a live handle |
+| `0E44 GET_CHAR_KILL_TARGET_CHAR` | no | needs a live handle |
+| `0EE4 LOCATE_CHAR_DISTANCE_TO_CHAR` | no (`pedA->GetPosition()` directly) | needs **two** live handles |
+| `0EB1 GET_CHAR_STAT_ID` | no (`*(DWORD*)ped->m_pStats`) | needs a live handle |
+| `0EFA GET_CHAR_FEAR` | no (`*(uint8_t*)(m_pStats + 0x24)`) | needs a live handle |
+
+An invalid or reclaimed ped handle in any of the five unchecked opcodes is a hard
+crash, not a `false`. The script's rule is therefore: a handle only ever reaches
+a CLEO+ opcode in the **same frame** it came out of `0AE1` (or out of
+`GET_PLAYER_CHAR`) and after `DOES_CHAR_EXIST` + `IS_CHAR_DEAD`, with no `WAIT`
+in between — the pool cannot reclaim a ped mid-frame. The one place a handle is
+kept across frames is `DEFENDER_HANDLE[5]`, and every read of it goes through
+`DOES_CHAR_EXIST` before anything dereferences it (`ReleaseOneDefender`, and the
+inlined copy of it in the slot-reuse path).
+
+`LOCATE_CHAR_DISTANCE_TO_CHAR` takes two handles, so the victim needs the same
+treatment: `RecruitDefenders` re-checks `DOES_CHAR_EXIST CANDIDATE` and
+`IS_CHAR_DEAD CANDIDATE` at the top of every frame of the recruit window, before
+the 3D distance test can run.

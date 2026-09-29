@@ -43,8 +43,10 @@
 //*      0E0A IS_CHAR_SCRIPT_CONTROLLED  0E47 IS_CHAR_FIGHTING
 //*      0EFA GET_CHAR_FEAR              0EB1 GET_CHAR_STAT_ID
 //*      0E44 GET_CHAR_KILL_TARGET_CHAR  0EE4 LOCATE_CHAR_DISTANCE_TO_CHAR
-//*  They are declared for the compiler in config/cleoplus.xml because the
-//*  cleo.xml that ships with gta3sc stops at 0xB16.
+//*  They are declared for the compiler in config/cleoplus.xml, because the
+//*  cleo.xml that ships with gta3sc stops at 0xB16.  That file is a verified
+//*  excerpt of the gta3sc definition CLEO+ itself publishes - the official one
+//*  cannot simply be added on top of gta3sc's config, see docs/COMPILER.md 5.1.
 //*
 //*  Install: copy bin/MOBBNOBRAVEZA.CS into the CLEO folder.
 //*
@@ -108,33 +110,21 @@ CONST_INT   DEFENDER_TIMEOUT        45000   // ms before a defender gives up
 // TOURIST only, and the pedstat blacklist below does the real coward work.
 CONST_INT   MAX_FEAR                70
 
-// GET_CHAR_STAT_ID (CLEO+) returns the pedstats.dat row of the ped (0-based).
-// These are exactly the rows whose "Default decision maker" column is 4, which
-// the game itself documents as "coward peds" - the peds the R_Weak decision
-// maker sends running.  They are rejected by name, not by guesswork:
-//      14 STAT_STREET_GUY    fear 45  DM 2     20 STAT_STREET_GIRL   DM 2
-//      15 STAT_SUIT_GUY      fear 35  DM 2     21 STAT_SUIT_GIRL     DM 2
-//      16 STAT_SENSIBLE_GUY  fear 65  DM 4     22 STAT_SENSIBLE_GIRL DM 4
-//      17 STAT_GEEK_GUY      fear 56  DM 4     23 STAT_GEEK_GIRL     DM 4
-//      18 STAT_OLD_GUY       fear 40  DM 2     24 STAT_OLD_GIRL      DM 2
-//      19 STAT_TOUGH_GUY     fear 30  DM 3     25 STAT_TOUGH_GIRL    DM 3
-//      34 STAT_STEWARD       fear 40  DM 4     36 STAT_SHOPPER       DM 4
-//      37 STAT_OLDSHOPPER    fear 45  DM 4     40 STAT_SKATER        DM 4
-//      42 STAT_COWARD        fear 65  DM 4
-// The male rows in that list are 16, 17, 34, 36, 37, 40 and 42.  Rows 14..25
-// are matched as one range because they are the six consecutive civilian
-// "guy/girl" personality rows - the female half never reaches the test
-// (IS_CHAR_MALE rejected it) and the male half of the range that is NOT a
-// coward (14, 15, 18, 19) is rejected too, on purpose: they are the peds that
-// in practice mill about instead of intervening, and the brief for this mod is
-// to only ever touch a man who will actually act against the player.
-CONST_INT   PEDSTAT_CIVILIAN_GUY    14      // STAT_STREET_GUY, first of the range
-CONST_INT   PEDSTAT_TOUGH_GIRL      25      // STAT_TOUGH_GIRL, last of the range
-CONST_INT   PEDSTAT_STEWARD         34
-CONST_INT   PEDSTAT_SHOPPER         36
-CONST_INT   PEDSTAT_OLDSHOPPER      37
-CONST_INT   PEDSTAT_SKATER          40
-CONST_INT   PEDSTAT_COWARD          42
+// GET_CHAR_STAT_ID (CLEO+) returns the ped's row in data/pedstats.dat,
+// 0-based.  The last column of that file is "Default decision maker", and the
+// game's own header documents the value 4 as "coward peds" - the peds the
+// R_Weak decision maker sends running.  Exactly nine rows carry it:
+//      16 SENSIBLE_GUY  17 GEEK_GUY  22 SENSIBLE_GIRL  23 GEEK_GIRL
+//      34 STEWARD       36 SHOPPER   37 OLDSHOPPER     40 SKATER
+//      42 COWARD
+// Seven of those are male: 16, 17, 34, 36, 37, 40 and 42.  (The female half
+// never reaches the test - IS_CHAR_MALE rejected it long before.)
+//
+// The names below come from the PEDSTAT enum that CLEO+ itself publishes for
+// gta3sc and that config/cleoplus.xml includes verbatim, so they are the
+// authority for the numbers; declaring them again here would fail with "user
+// constant exists already as a string constant".  The full vanilla table, with
+// the Fear value of each row, is in docs/ANALISE.md section 5.2.
 
 // -- rate limiting ----------------------------------------------------------
 CONST_INT   WAVE_COOLDOWN           8000    // ms between two reactions (global)
@@ -144,7 +134,6 @@ CONST_INT   VICTIM_COOLDOWN         25000   // ms before the same woman re-trigg
 CONST_FLOAT EYE_HEIGHT              0.7     // raises the LOS ray off the ground
 CONST_FLOAT NO_OFFSET               0.0
 CONST_INT   PLAYER_INDEX            0       // CJ is always player 0
-CONST_INT   KEY_F10                 121     // VK_F10
 CONST_INT   SLOT_EMPTY              0       // a free DEFENDER_HANDLE entry
 CONST_INT   NO_SLOT                 -1      // "no free slot found"
 
@@ -242,7 +231,8 @@ GOSUB PollHotkey
 // IS_PLAYER_PLAYING is false whenever CJ is wasted, busted or locked down by a
 // cutscene.  IS_ON_MISSION reads the global set by 0180, which a plain CLEO
 // script cannot reach at all - this is the gap that made the 2011 original
-// hijack mission peds.  IS_CHAR_SCRIPT_CONTROLLED later catches the rest.
+// hijack mission peds.  IS_CHAR_SCRIPT_CONTROLLED later catches the script-owned
+// peds individually.
 //----------------------------------------------------------------------------
 IF NOT IS_PLAYER_PLAYING PLAYER_INDEX
     GOSUB ReleaseAllDefenders
@@ -390,7 +380,7 @@ GOTO LOOP_FOREVER
 // clobbers: -
 //----------------------------------------------------------------------------
 PollHotkey:
-IF IS_KEY_JUST_PRESSED KEY_F10
+IF IS_KEY_JUST_PRESSED VK_F10
     IF ENABLED = 1
         ENABLED = 0
     ELSE
@@ -478,10 +468,12 @@ IF IS_CHAR_IN_AIR DEFENDER
     GOTO RECRUIT_NEXT_WITNESS
 ENDIF
 
-// --- owned by the game or by somebody else's script? -----------------------
-// IS_CHAR_SCRIPT_CONTROLLED covers mission peds, peds created by other CLEO
-// mods and anything else another script is currently driving.  GET_PED_TYPE
-// then catches whatever is left of the mission and player ped types.
+// --- created or adopted by a script? ---------------------------------------
+// IS_CHAR_SCRIPT_CONTROLLED (CLEO+) is true when the ped's "created by" field
+// says a script owns him - mission peds and peds spawned by other CLEO mods.
+// Random world peds are false, so this is not a substitute for the pedtype
+// test below: GET_PED_TYPE still catches the mission and player ped types that
+// were not script-created.
 IF IS_CHAR_SCRIPT_CONTROLLED DEFENDER
     GOTO RECRUIT_NEXT_WITNESS
 ENDIF
@@ -545,7 +537,7 @@ ENDIF
 //    player, and in practice those four mill about, shout or wander off.  Drop
 //    the range test and keep the four individual ones to recruit them as well.
 GET_CHAR_STAT_ID DEFENDER CURSOR
-IF CURSOR >= PEDSTAT_CIVILIAN_GUY
+IF CURSOR >= PEDSTAT_STREET_GUY
     IF CURSOR <= PEDSTAT_TOUGH_GIRL
         GOTO RECRUIT_NEXT_WITNESS
     ENDIF

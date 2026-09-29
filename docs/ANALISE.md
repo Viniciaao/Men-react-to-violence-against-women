@@ -223,7 +223,7 @@ recruta turbas durante missões.
 | B6 | `WAVE_COOLDOWN = 8 s` (global) e `VICTIM_COOLDOWN = 25 s` (por vítima). |
 | B7 | `IS_LINE_OF_SIGHT_CLEAR` entre a vítima e a testemunha, com o raio elevado a `EYE_HEIGHT = 0.7` para não bater no chão. |
 | B8 | Uma passada só, com `RECRUIT_WINDOW = 2.5 s` e `RECRUIT_STEP_DELAY = 120 ms` entre recrutamentos; a posição da vítima é **relida a cada quadro**. |
-| B10 | Filtros por pedtype (`PEDTYPE_COP`, `PEDTYPE_MISSION1..8`, `PEDTYPE_PLAYER1..PLAYER_UNUSED`), `IS_CHAR_SCRIPT_CONTROLLED` (CLEO+), `IS_CHAR_ON_FOOT`, `IS_CHAR_IN_WATER`, `IS_CHAR_IN_AIR`, `IS_CHAR_DEAD`, `DOES_CHAR_EXIST`, vítima e jogador excluídos, e checagem contra os 5 slots já recrutados. |
+| B10 | Filtros por pedtype (`PEDTYPE_COP`, `PEDTYPE_MISSION1..8`, `PEDTYPE_PLAYER1..PLAYER_UNUSED`), `IS_CHAR_SCRIPT_CONTROLLED` (CLEO+, peds criados/adotados por script), `IS_CHAR_ON_FOOT`, `IS_CHAR_IN_WATER`, `IS_CHAR_IN_AIR`, `IS_CHAR_DEAD`, `DOES_CHAR_EXIST`, vítima e jogador excluídos, e checagem contra os 5 slots já recrutados. |
 | B11 | O `are_any_chars_near_char` sumiu: o `0AE1` já resolve. |
 | B12 | O laço principal roda a cada quadro (`WAIT 0`) porque o hotkey é *edge-triggered*, mas tudo que é caro fica atrás de um portão de `SCAN_INTERVAL = 200 ms`; `WAIT 0` também dentro da janela de recrutamento (curta). |
 | B13 | **Deliberadamente não corrigido.** O requisito desta reescrita é não haver nenhum texto na tela. O feedback do mod é a própria turba. O estado (ligado/desligado e opções) é exposto nas variáveis compartilhadas CLEO 3100/3101 para quem quiser construir um aviso por fora. |
@@ -259,8 +259,10 @@ Removido por requisito explícito (§5), e não por descuido:
   absolutamente nada com ele (§5.2).
 * **Bloqueio real por missão e cutscene** (`0E1D`, `0E25`, `0EB7`), que com CLEO
   puro era impossível (§5.3).
-* **Respeito a peds de outros mods** (`0E0A IS_CHAR_SCRIPT_CONTROLLED`) e a quem
-  já está em combate (`0E47 IS_CHAR_FIGHTING`).
+* **Respeito a peds de outros mods** (`0E0A IS_CHAR_SCRIPT_CONTROLLED`, que é
+  verdadeiro quando um script criou/adotou o ped) e a quem já está em combate
+  corpo a corpo (`0E47 IS_CHAR_FIGHTING` — veja a nota sobre a semântica exata
+  em §5.4).
 * **Liberação limpa e cirúrgica**: ao expirar o tempo (`DEFENDER_TIMEOUT`), ou
   quando o jogador morre, é preso, entra num carro, inicia uma missão/cutscene ou
   desliga o mod, a tarefa só é limpa de quem **ainda tem o jogador como alvo de
@@ -329,3 +331,114 @@ exatamente o `$ONMISSION`. O bloqueio durante missões deixou de ser heurístico
 Como esses opcodes não existem no `cleo.xml` do gta3sc (que para em `0xB16`),
 eles são declarados em [`config/cleoplus.xml`](../config/cleoplus.xml) e o build
 passa `--add-config` — detalhes em `docs/COMPILER.md` §5.
+
+### 5.4 O que cada opcode CLEO+ realmente responde
+
+Conferido no código-fonte do CLEO+ (`JuniorDjjr/CLEOPlus`, branch `main`, commit
+`d04732be7251`) e não apenas na documentação — os detalhes estão em
+[`docs/COMPILER.md`](COMPILER.md) §7.
+
+| Opcode | O que responde de fato | Consequência para o mod |
+|---|---|---|
+| `0E1D IS_ON_MISSION` | A global que o `0180` seta é diferente de zero | Bloqueio total durante missões — o `$ONMISSION` que `.cs` não alcança |
+| `0E25` / `0EB7` | Cutscene ativa / cutscene de missão com bordas *widescreen* | Nada é recrutado nem mantido durante cutscenes |
+| `0E3D IS_KEY_JUST_PRESSED` | Tecla baixou **neste frame** (estado atual vs. estado no frame anterior) | F10 sem debounce e sem repetir com a tecla segurando; exige que o laço rode a cada frame |
+| `0E0A IS_CHAR_SCRIPT_CONTROLLED` | `m_nCreatedBy == 2`: um script **criou ou adotou** o ped | Pega peds de missão e de outros mods CLEO. **Não substitui** o teste de pedtype para personagens de missão que não foram criados por script |
+| `0E47 IS_CHAR_FIGHTING` | O ped tem `TASK_SIMPLE_FIGHT` (1016) na cadeia de tasks **deste frame** | Significa "está trocando socos agora", e não "está hostil". Um defensor perseguindo o jogador ou atirando nele não é "fighting"; quem já está numa luta corporal é — e é justamente esse que não devemos ter a IA sobrescrita |
+| `0E44 GET_CHAR_KILL_TARGET_CHAR` | O ponteiro de alvo lido de dentro da `TASK_COMPLEX_KILL_PED_ON_FOOT` (1000) que o `05E2` criou; `-1` se não houver alvo vivo | É a resposta exata para "ele ainda está na **nossa** task?", o que permite liberar sem tocar em ped que o jogo já reencaminhou |
+| `0EB1 GET_CHAR_STAT_ID` | `m_Index`, o primeiro campo de `CPedStats` (`CPed +0x59C`) | É o **índice** da linha em `pedstats.dat`, não um ponteiro — confirmado pelo layout da struct |
+| `0EFA GET_CHAR_FEAR` | `m_ucFear`, um `unsigned char` em `CPedStats +0x24` | É a coluna *Fear* de verdade (0–100), não um campo de bits |
+| `0EE4 LOCATE_CHAR_DISTANCE_TO_CHAR` | Distância 3D ao quadrado entre dois peds ≤ raio² | Substitui os seis argumentos do `LOCATE_CHAR_ANY_MEANS_CHAR_3D` |
+
+Os dados de `0E47` e `0E44` vêm de um cache que o CLEO+ reconstrói **para todos
+os peds do pool, todo frame**, zerando os flags e percorrendo as cinco tasks
+primárias e as cinco secundárias com todas as subtasks. Não há valor obsoleto
+para contornar.
+
+---
+
+## 6. Revisão final (passo 8 do plano)
+
+### 6.1 Risco de travamento
+
+O risco real está em cinco dos opcodes CLEO+ usados, que **desreferenciam o ped
+sem checagem de nulo** (`GET_CHAR_STAT_ID`, `GET_CHAR_FEAR`,
+`GET_CHAR_KILL_TARGET_CHAR`, `IS_CHAR_FIGHTING`, `LOCATE_CHAR_DISTANCE_TO_CHAR`
+— este último com *dois* handles). `CPools::GetPed` devolve `nullptr` para um
+handle inválido, então handle ruim ali é travamento, não `false`. Só
+`IS_CHAR_SCRIPT_CONTROLLED` checa.
+
+A regra do script é, por isso, estrutural: um handle só chega a um opcode CLEO+
+**no mesmo frame** em que saiu do `0AE1` (ou do `GET_PLAYER_CHAR`) e depois de
+`DOES_CHAR_EXIST` + `IS_CHAR_DEAD`, sem nenhum `WAIT` entre a checagem e o uso —
+o pool não tem como reclaimar um ped no meio de um frame. O único lugar em que um
+handle atravessa frames é `DEFENDER_HANDLE[5]`, e toda leitura dele passa por
+`DOES_CHAR_EXIST` antes de qualquer desreferência. A vítima recebe a mesma
+checagem a cada frame da janela de recrutamento, porque `0EE4` usa os dois
+handles.
+
+Nos demais eixos de estabilidade do SA:
+
+* nenhuma referência é adquirida (variantes `*_NO_SAVE`), então não há vazamento
+  de referência nem `MARK_CHAR_AS_NO_LONGER_NEEDED` esquecido;
+* nenhum `CGroup` é criado — o vazamento de grupos do original (B2) não tem como
+  acontecer;
+* nenhuma global é escrita, nada é salvo em disco;
+* todo laço tem `WAIT`;
+* o uso de `BREAK` dentro de `REPEAT` depende de `-fbreak-continue`, que o
+  `build.sh` passa.
+
+### 6.2 Custo por frame
+
+| Situação | Custo |
+|---|---|
+| Ocioso (quase todo o tempo) | ~12 opcodes/frame: `WAIT 0`, `0E3D`, as cinco checagens de estado, dois *fast paths* de liberação (um comparador cada) e o portão de `SCAN_INTERVAL` |
+| A cada `SCAN_INTERVAL` (200 ms) | o portão passa: `GET_GAME_TIMER`, `GET_CHAR_COORDINATES` e o `0AE1` num raio de 3 m |
+| Durante a janela (2,5 s por agressão) | `WAIT 0` com `0AE1` num raio de 25 m e a cadeia de filtros por candidato |
+
+Duas decisões de custo deliberadas:
+
+* **O laço principal é `WAIT 0`, não `WAIT 200`.** `IS_KEY_JUST_PRESSED` só é
+  verdadeiro no frame em que a tecla baixa; sondá-lo a cada 200 ms engoliria a
+  maioria das tecladas. Tudo que é caro ficou atrás do portão de `SCAN_INTERVAL`,
+  então o preço de rodar a cada frame é um opcode.
+* **Os filtros de recrutamento vão do mais barato ao mais caro.** Distância
+  (`0EE4`, um opcode) e linha de visão descartam a maior parte de uma rua cheia
+  antes que qualquer leitura de dados do ped (`0EB1`, `0EFA`) aconteça.
+
+### 6.3 Defeitos encontrados nesta revisão e corrigidos
+
+1. **Slot expirado sobrescrito sem liberar o ped.** O caminho que reaproveita um
+   slot cujo dono estourou o `DEFENDER_TIMEOUT` substituía o handle com a
+   `TASK_KILL_CHAR_ON_FOOT` ainda ativa e nada mais para cronometrá-la: um homem
+   perseguindo o jogador para sempre — exatamente o comportamento do original.
+   Agora o ocupante antigo é liberado antes.
+2. **Liberação cega.** `CLEAR_CHAR_TASKS_IMMEDIATELY` era chamado em qualquer
+   defensor expirado. Agora só em quem ainda tem o jogador como alvo de kill
+   (`0E44`); se o jogo deu outra task ao ped, o script não interfere — o
+   requisito 3 vale também na saída.
+3. **Janela de recrutamento gasta à toa.** Se a vítima entra num carro, o
+   recrutamento é interrompido em vez de varrer uma rua onde não há mais ninguém
+   para defender.
+4. **Rotinas de liberação sem *fast path*.** Com o laço rodando a cada frame,
+   `ReleaseAllDefenders` passaria a ser chamado todo frame durante missões,
+   cutscenes e dentro do carro. Como os slots são preenchidos do índice 0 para
+   cima e só são liberados em ordem, slot 0 vazio implica lista vazia — um
+   comparador resolve.
+
+### 6.4 O que continua sendo limitação
+
+* **`DEFENDER_TIMEOUT` é absoluto, não por distância.** Um defensor desiste após
+  45 s mesmo que o jogador continue perto. É o preço de não reintroduzir a
+  perseguição permanente do original (B5); novas agressões recrutam de novo.
+* **`MAX_FEAR` está calibrado para a `pedstats.dat` vanilla.** Um mod de peds que
+  reescreva a coluna *Fear* do jogo inteiro desloca o corte. Os dois testes são
+  independentes: `MAX_FEAR = 100` desliga o de fear e deixa só a blacklist por
+  pedstat, que é a classificação do próprio jogo.
+* **O requisito 3 exclui mais peds do que o jogo classificaria como covardes.**
+  `STREET_GUY`, `SUIT_GUY`, `OLD_GUY` e `TOUGH_GUY` têm decision maker 2 ou 3 e
+  ainda assim são rejeitados, porque na prática não intervêm. É uma escolha
+  documentada em §5.2, isolada num único teste, e removível sem tocar no resto.
+* **Dependência dura do CLEO+.** Sem ele o script nem carrega. É deliberado:
+  perguntar se um ped é covarde é impossível com CLEO puro, e o requisito 4 não
+  tem como ser atendido de outra forma.

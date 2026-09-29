@@ -65,8 +65,11 @@ sorteio:
    `SENSIBLE_GUY`, `GEEK_GUY`, `SENSIBLE_GIRL`, `GEEK_GIRL`, `STEWARD`,
    `SHOPPER`, `OLDSHOPPER`, `SKATER` e `COWARD`. Sete são masculinas e são
    rejeitadas (as femininas nem chegam lá: `IS_CHAR_MALE` já as descartou).
-   O intervalo `14..25` é rejeitado inteiro de propósito — veja o comentário no
-   fonte se quiser recrutar também `STREET_GUY`/`SUIT_GUY`/`OLD_GUY`/`TOUGH_GUY`.
+   No fonte elas aparecem pelos nomes oficiais do enum `PEDSTAT` que o próprio
+   CLEO+ publica para o gta3sc (`PEDSTAT_STEWARD`, `PEDSTAT_COWARD`, …), então os
+   números não são chutados. O intervalo `PEDSTAT_STREET_GUY..PEDSTAT_TOUGH_GIRL`
+   (14..25) é rejeitado inteiro de propósito — veja `docs/ANALISE.md` §5.2 se
+   quiser recrutar também `STREET_GUY`/`SUIT_GUY`/`OLD_GUY`/`TOUGH_GUY`.
 2. **`GET_CHAR_FEAR`** devolve a coluna *Fear* do mesmo arquivo (0–100,
    100 = "medo de tudo"). É o número que o jogo usa para decidir quão rápido um
    ped foge. Pega as linhas que não são marcadas como covardes mas entram em
@@ -144,10 +147,18 @@ gta3sc src/MOBBNOBRAVEZA.sc --config=gtasa \
 Os dois arquivos de suporte são parte do projeto, não detalhes do ambiente:
 
 * **[`config/cleoplus.xml`](config/cleoplus.xml)** — declara os 10 opcodes
-  CLEO+ para o compilador. O `config/gtasa/cleo.xml` que vem com o gta3sc para
-  em `0xB16`, então ele não conhece nenhum `0Exx`. Passado com `--add-config`
-  (caminho absoluto: o gta3sc resolve caminhos relativos a partir do diretório
-  de configuração *dele*).
+  CLEO+ para o compilador, mais o enum oficial `PEDSTAT`. O `config/gtasa/cleo.xml`
+  que vem com o gta3sc para em `0xB16`, então ele não conhece nenhum `0Exx`.
+  Passado com `--add-config` (caminho absoluto: o gta3sc resolve caminhos
+  relativos a partir do diretório de configuração *dele*).
+
+  O CLEO+ **já traz** um XML para gta3sc (`(for developers)/gta3script/cleo.xml`),
+  e cada declaração daqui foi comparada com ele — mesmo ID, mesma ordem e mesmos
+  atributos. Usar o arquivo oficial direto não dá: ele é um *superset* de 439
+  comandos e o `--add-config` **anexa**, o que redefiniria dois opcodes vanilla
+  do SA (`0x485 IS_PC_VERSION` viraria `RETURN_TRUE`, `0x59A IS_AUSTRALIAN_GAME`
+  viraria `RETURN_FALSE`) e sobrescreveria dois valores do enum `BONE`. Daí o
+  extrato mínimo. Análise completa em `docs/COMPILER.md` §5.1.
 * **`-fno-entity-tracking`** — o verificador de tipos de entidade do gta3sc não
   propaga o tipo através de elementos de array, e guardar handles de ped num
   array (`DEFENDER_HANDLE[5]`) é justamente o design do mod. Sem a flag, todo
@@ -243,6 +254,8 @@ não são tocados.
   publicado no MixMods. Este repositório é uma reimplementação independente,
   feita a partir da análise do script descompilado.
 * Compilador: **Denilson "thelink2012" Amorim** — [gta3sc](https://github.com/thelink2012/gta3sc) (MIT).
-* Opcodes estendidos: **JuniorDjjr** — [CLEO+](https://github.com/JuniorDjjr/CLEOPlus).
+* Opcodes estendidos: **JuniorDjjr** — [CLEO+](https://github.com/JuniorDjjr/CLEOPlus),
+  de onde também vem o arquivo gta3sc oficial usado como referência
+  (commit `d04732be7251`).
 * Referência de opcodes: **Sanny Builder Library** —
   [sannybuilder/library](https://github.com/sannybuilder/library).
