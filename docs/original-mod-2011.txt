@@ -1,0 +1,95 @@
+Reference copy of the original mod, as provided for analysis.
+
+  Mod      : "Não bata em mulheres v2"
+  Author   : Izerli / Веревкин Иван (2011)
+  Page     : https://www.mixmods.com.br/2015/07/nao-bata-em-mulheres-v2/
+  Form     : decompiled .cs (Sanny Builder flavour)
+  Status   : kept here only as the input of docs/ANALISE.md. It does not
+             compile as-is (see the E1..E5 findings in that document).
+
+The debug string is Windows-1251 Cyrillic and reads:
+  "Не бей женщин 2, автор Izerli/Веревкин Иван, 2011 год"
+  ("Don't hit women 2, author Izerli/Verevkin Ivan, 2011")
+
+--------------------------------------------------------------------------------
+
+{$CLEO .CS}
+{$USE debug}
+
+write_debug "ÍÅ ÁÅÉ ÆÅÍÙÈÍÓ 2, ÀÂÒÎÐ IZERLI/ÂÅÐÅÂÊÈÍ ÈÂÀÍ, 2011 ÃÎÄ"
+script_name 'MYDAK'
+
+:MYDAK_69
+wait 2000
+
+:MYDAK_74
+wait 0
+if
+  is_player_playing $PLAYER_CHAR
+goto_if_false @MYDAK_69
+wait 0
+if
+  are_any_chars_near_char $PLAYER_ACTOR in_range 2.0
+goto_if_false @MYDAK_528
+1@, 2@, 3@ = get_char_coordinates $PLAYER_ACTOR
+get_random_char_in_area_offset_no_save 1@ 2@ 3@ radius 2.0 2.0 2.0 handle_as 4@
+if
+  does_char_exist 4@
+goto_if_false @MYDAK_74
+if
+  not is_char_male 4@
+goto_if_false @MYDAK_528
+if and
+  not is_int_lvar_equal_to_int_lvar 4@ == 7@
+  has_char_been_damaged_by_char 4@ damaged_by_actor $PLAYER_ACTOR
+goto_if_false @MYDAK_528
+set_lvar_int_to_lvar_int 7@ = 4@
+create_group 8@ = create_group_type 5
+set_group_leader 4@ in_group 8@
+wait 10
+1@, 2@, 3@ = get_char_coordinates 4@
+if
+  get_random_char_in_sphere_no_save_recursive 5@ = random_char_near_point 1@ 2@ 3@ in_radius 20.0 find_next 0 pass_deads 1
+goto_if_false @MYDAK_386
+
+:MYDAK_296
+wait 0
+if
+  does_char_exist 5@
+goto_if_false @MYDAK_356
+if
+  not is_int_lvar_equal_to_int_lvar 5@ == 4@
+  is_char_male 5@
+goto_if_false @MYDAK_356
+set_group_member 5@ in_group 8@
+task_kill_char_on_foot 5@ kill_actor $PLAYER_ACTOR
+
+:MYDAK_356
+  not get_random_char_in_sphere_no_save_recursive 5@ = random_char_near_point 1@ 2@ 3@ in_radius 20.0 find_next 1 pass_deads 1
+goto_if_false @MYDAK_296
+
+:MYDAK_386
+wait 10
+1@, 2@, 3@ = get_char_coordinates 4@
+if
+  get_random_char_in_sphere_no_save_recursive 6@ = random_char_near_point 1@ 2@ 3@ in_radius 20.0 find_next 0 pass_deads 1
+goto_if_false @MYDAK_528
+
+:MYDAK_438
+wait 0
+if
+  does_char_exist 5@
+goto_if_false @MYDAK_498
+if
+  not is_int_lvar_equal_to_int_lvar 6@ == 4@
+  is_char_male 6@
+goto_if_false @MYDAK_498
+set_group_member 6@ in_group 8@
+task_kill_char_on_foot 6@ kill_actor $PLAYER_ACTOR
+
+:MYDAK_498
+  not get_random_char_in_sphere_no_save_recursive 6@ = random_char_near_point 1@ 2@ 3@ in_radius 20.0 find_next 1 pass_deads 1
+goto_if_false @MYDAK_438
+
+:MYDAK_528
+goto @MYDAK_74

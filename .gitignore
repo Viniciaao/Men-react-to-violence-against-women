@@ -1,0 +1,11 @@
+# Cloned third-party sources (re-fetched by ./build.sh --rebuild-tools)
+tools/gta3sc/
+tools/sbl/
+tools/cmake/
+
+# Build output that is reproducible from source
+build/
+*.o
+*.tar.gz
+
+# Keep bin/MOBBNOBRAVEZA.cs: it is the artifact people install.
