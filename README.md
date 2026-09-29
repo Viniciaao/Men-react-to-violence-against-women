@@ -97,8 +97,7 @@ edite e recompile com `./build.sh`.
 | `ENABLED_ON_START` | `1` | Começa ligado |
 | `SCAN_INTERVAL` | `200` ms | Intervalo da varredura cara (o laço roda a cada frame) |
 | `VICTIM_SCAN_RADIUS` | `3.0` m | Raio em que se procura uma mulher agredida |
-| `DEFEND_RADIUS` | `25.0` m | Raio em que as testemunhas reagem |
-| `DEFEND_RADIUS_Z` | `8.0` m | Tolerância vertical do raio de linha de visão |
+| `DEFEND_RADIUS` | `25.0` m | Raio em que as testemunhas reagem (3D) |
 | `MAX_DEFENDERS` | `5` | **Teto** de defensores simultâneos (o original não tinha) |
 | `RECRUIT_WINDOW` | `2500` ms | Por quanto tempo se procura testemunhas |
 | `RECRUIT_STEP_DELAY` | `120` ms | Pausa entre dois recrutamentos (anti-turba) |

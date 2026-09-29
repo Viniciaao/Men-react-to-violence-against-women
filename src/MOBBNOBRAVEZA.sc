@@ -92,7 +92,7 @@ CONST_FLOAT VICTIM_SCAN_RADIUS      3.0     // how close to the player we look
 
 // -- recruitment ------------------------------------------------------------
 CONST_FLOAT DEFEND_RADIUS           25.0    // witnesses inside this radius react
-CONST_FLOAT DEFEND_RADIUS_Z         8.0     // vertical tolerance of the LOS ray
+                                            // (3D: 0EE4 compares the full vector)
 CONST_INT   MAX_DEFENDERS           5       // hard cap on simultaneous defenders
 CONST_INT   RECRUIT_WINDOW          2500    // ms spent looking for witnesses
 CONST_INT   RECRUIT_STEP_DELAY      120     // ms between two recruitments
@@ -500,7 +500,10 @@ IF NOT LOCATE_CHAR_DISTANCE_TO_CHAR DEFENDER CANDIDATE DEFEND_RADIUS
 ENDIF
 
 // --- line of sight, so nobody reacts through a wall ------------------------
-// PX/PY/PZ (22@..24@) are the scan-loop scratch and are re-read every scan.
+// The 3D distance test above has no vertical tolerance of its own, so a witness
+// on a balcony would pass it; this ray is what keeps the reaction on the same
+// level as the victim.  PX/PY/PZ (22@..24@) are the scan-loop scratch and are
+// re-read every scan.
 GET_OFFSET_FROM_CHAR_IN_WORLD_COORDS DEFENDER NO_OFFSET NO_OFFSET EYE_HEIGHT PX PY PZ
 IF NOT IS_LINE_OF_SIGHT_CLEAR PX PY PZ VX VY VZ 1 0 1 0 0
     GOTO RECRUIT_NEXT_WITNESS
