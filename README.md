@@ -77,9 +77,11 @@ sorteio:
    rejeitadas (as femininas nem chegam lá: `IS_CHAR_MALE` já as descartou).
    No fonte elas aparecem pelos nomes oficiais do enum `PEDSTAT` que o próprio
    CLEO+ publica para o gta3sc (`PEDSTAT_STEWARD`, `PEDSTAT_COWARD`, …), então os
-   números não são chutados. O intervalo `PEDSTAT_STREET_GUY..PEDSTAT_TOUGH_GIRL`
-   (14..25) é rejeitado inteiro de propósito — veja `docs/ANALISE.md` §5.2 se
-   quiser recrutar também `STREET_GUY`/`SUIT_GUY`/`OLD_GUY`/`TOUGH_GUY`.
+   números não são chutados. **A lista é exatamente essas sete e nenhuma outra**:
+   uma versão anterior rejeitava o intervalo `14..25` inteiro, o que excluía
+   `STREET_GUY`, `SUIT_GUY`, `OLD_GUY` e `TOUGH_GUY` — as linhas que os homens
+   comuns de Los Santos usam. O resultado era o mod detectar a vítima, abrir a
+   janela e não recrutar ninguém (`docs/ANALISE.md` §6.3quater).
 2. **`GET_CHAR_FEAR`** devolve a coluna *Fear* do mesmo arquivo (0–100,
    100 = "medo de tudo"). É o número que o jogo usa para decidir quão rápido um
    ped foge. Pega as linhas que não são marcadas como covardes mas entram em
@@ -298,6 +300,7 @@ MENREACT COOLDOWN LEFT S: 5                    <- estado periódico
 MENREACT IDLE: A MISSION IS RUNNING            <- estado periódico
 MENREACT: VICTIM DETECTED, RECRUITING          <- evento
 MENREACT RECRUITED, DEFENDERS NOW: 3           <- evento
+MENREACT WINDOW OVER, DEFENDERS: 3             <- evento: a janela terminou
 MENREACT: MOB FULL, WITNESS LEFT ALONE         <- evento
 MENREACT: DEFENDER TIMED OUT, RELEASED         <- evento
 MENREACT RELEASED DEFENDERS: 3                 <- evento
@@ -308,7 +311,9 @@ ScrDebug mostra uma **lista rolante com as últimas 12 mensagens** na lateral da
 tela, e uma linha por tick (200 ms) empurraria os **eventos** — que são o que
 interessa — para fora da tela antes de dar tempo de ler. O heartbeat existe por
 causa do defeito que o teste em jogo revelou: tela silenciosa não se distingue
-de "o script nem carregou" (`docs/ANALISE.md` §6.3ter).
+de "o script nem carregou" (`docs/ANALISE.md` §6.3ter). A linha `WINDOW OVER,
+DEFENDERS: N` existe pelo segundo teste: distinguir "nenhum homem passou nos
+filtros" de "a janela nem chegou ao fim" (`docs/ANALISE.md` §6.3quater).
 
 Quatro coisas que a implementação impõe e que valem saber antes de editar:
 

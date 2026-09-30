@@ -582,22 +582,28 @@ ENDIF
 //        16 SENSIBLE_GUY  17 GEEK_GUY  22 SENSIBLE_GIRL  23 GEEK_GIRL
 //        34 STEWARD       36 SHOPPER   37 OLDSHOPPER     40 SKATER
 //        42 COWARD
-//    Seven are male: 16, 17, 34, 36, 37, 40 and 42.  (The female half never
-//    reaches this point - IS_CHAR_MALE rejected it in the caller.)
+//    Seven are male: 16, 17, 34, 36, 37, 40 and 42.  The female half is turned
+//    away earlier by IS_CHAR_MALE - which, note, is a ped-type test and not a
+//    model test, so it is these rows plus the caller's own filter that decide,
+//    not any idea the engine has about the model in front of it.
 //
-//    Rows 14..25 are matched as one range because they are the twelve
-//    consecutive civilian "guy/girl" personality rows.  That deliberately also
-//    rejects the four male rows the game does NOT flag as coward - 14
-//    STREET_GUY (dm 2), 15 SUIT_GUY (dm 2), 18 OLD_GUY (dm 2) and 19 TOUGH_GUY
-//    (dm 3): the brief is to only ever touch a man who will actually act against
-//    the player, and in practice those four mill about, shout or wander off.
-//    Delete the range test below and keep the four individual ones to recruit
-//    them as well; nothing else has to change.
+//    The blacklist is exactly those seven male rows, and nothing else.  An
+//    earlier revision rejected the whole 14..25 block of civilian "guy/girl"
+//    personalities on the theory that STREET_GUY (dm 2), SUIT_GUY (dm 2),
+//    OLD_GUY (dm 2) and TOUGH_GUY (dm 3) only mill about, shout and wander off.
+//    That was wrong in the only way that matters: those four rows are what the
+//    ordinary male pedestrians of Los Santos actually use, so the recruit loop
+//    walked a whole street and rejected every man on it.  The playtest said it
+//    plainly - the victim was detected, the window opened, nobody came.  The
+//    requirement is to leave cowards alone, and the game's own decision-maker
+//    column is what says who is a coward; guessing beyond it removes the crowd
+//    the mod is supposed to raise.
 GET_CHAR_STAT_ID DEFENDER CURSOR
-IF CURSOR >= PEDSTAT_STREET_GUY
-    IF CURSOR <= PEDSTAT_TOUGH_GIRL
-        GOTO COWARD_YES
-    ENDIF
+IF CURSOR = PEDSTAT_SENSIBLE_GUY
+    GOTO COWARD_YES
+ENDIF
+IF CURSOR = PEDSTAT_GEEK_GUY
+    GOTO COWARD_YES
 ENDIF
 IF CURSOR = PEDSTAT_STEWARD
     GOTO COWARD_YES
@@ -656,6 +662,21 @@ ENDIF
 GET_GAME_TIMER NOW
 NOW = NOW - WAVE_TIME
 IF NOW > RECRUIT_WINDOW
+    // One line per wave, so a wave that recruited nobody can be told apart from
+    // a wave that never ran to its end: "victim detected" without this line
+    // means the window was cut short (she got into a car, the player did, a
+    // mission or a cutscene started), and this line reporting zero defenders
+    // means every witness in range failed one of the filters below.
+    GOSUB DebugGate
+    IF DBG_COUNT = 1
+        DBG_COUNT = 0
+        REPEAT MAX_DEFENDERS CURSOR
+            IF DEFENDER_HANDLE[CURSOR] > SLOT_EMPTY
+                DBG_COUNT = DBG_COUNT + 1
+            ENDIF
+        ENDREPEAT
+        WRITE_DEBUG_WITH_INT "MenReact window over, defenders" DBG_COUNT
+    ENDIF
     RETURN
 ENDIF
 IF NOT DOES_CHAR_EXIST CANDIDATE
@@ -708,6 +729,16 @@ ENDIF
 IF IS_CHAR_DEAD DEFENDER
     GOTO RECRUIT_NEXT_WITNESS
 ENDIF
+// 03A3 is a ped-type test, not a model test: it answers true unless the type is
+// CIVFEMALE or PROSTITUTE.  Two consequences, and both are accepted here.  No
+// man is ever lost - gang, criminal and bum types all answer true, whatever the
+// model.  And a woman whose type is GANG*, CRIMINAL or BUM answers true as well,
+// because those types are shared by both sexes and the engine exposes no opcode
+// for the sex of a model.  In gang territory she can therefore end up in the
+// mob too; listing female models by hand would break the moment a ped mod is
+// installed, which is a worse trade.  On the victim side the same semantics are
+// what make the scan precise: only a CIVFEMALE or PROSTITUTE counts as "a woman
+// being hit".
 IF NOT IS_CHAR_MALE DEFENDER
     GOTO RECRUIT_NEXT_WITNESS
 ENDIF
@@ -755,8 +786,15 @@ ENDIF
 // on a balcony would pass it; this ray is what keeps the reaction on the same
 // level as the victim.  PX/PY/PZ (20@..22@) are the scan-loop scratch and are
 // re-read every scan.
+//
+// 06BD takes five flags - buildings, cars, chars, objects, particles - and only
+// buildings is set here.  "chars" was set in an earlier revision, which meant
+// that a ped standing between the witness and the victim broke the ray: in a
+// crowd, which is exactly when this mod fires, that rejected essentially
+// everybody.  The intent of this test is "nobody reacts through a wall", so a
+// bystander, a parked car or a bin must not count as an obstruction.
 GET_OFFSET_FROM_CHAR_IN_WORLD_COORDS DEFENDER NO_OFFSET NO_OFFSET EYE_HEIGHT PX PY PZ
-IF NOT IS_LINE_OF_SIGHT_CLEAR PX PY PZ VX VY VZ 1 0 1 0 0
+IF NOT IS_LINE_OF_SIGHT_CLEAR PX PY PZ VX VY VZ 1 0 0 0 0
     GOTO RECRUIT_NEXT_WITNESS
 ENDIF
 

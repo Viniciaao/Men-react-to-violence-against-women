@@ -322,12 +322,19 @@ por isso que o original sorteava dados. O CLEO+ expõe os dois campos de
   `MAX_FEAR = 70`; pega `TOURIST` (fear 100), que não é marcado como covarde mas
   entra em pânico, e qualquer valor que um mod de peds tenha alterado.
 
-O intervalo de linhas `14..25` é rejeitado por inteiro, o que exclui também
-`STREET_GUY` (dm 2), `SUIT_GUY` (dm 2), `OLD_GUY` (dm 2) e `TOUGH_GUY` (dm 3).
-Não são covardes para o jogo — é uma escolha desta reescrita, derivada do
-requisito 3 (só mexer com quem vai de fato agir), e está isolada num único teste
-com comentário no fonte: remover as quatro linhas do intervalo devolve esses
-peds ao recrutamento sem tocar em mais nada.
+**A blacklist é exatamente essas sete linhas masculinas e nenhuma outra.** Uma
+versão anterior rejeitava o intervalo `14..25` inteiro — o bloco das doze
+personalidades civis "guy/girl" — sob o argumento de que `STREET_GUY` (dm 2),
+`SUIT_GUY` (dm 2), `OLD_GUY` (dm 2) e `TOUGH_GUY` (dm 3) "só circulam, gritam e
+vão embora". O segundo teste em jogo mostrou o preço: essas quatro linhas são as
+que os homens comuns de Los Santos de fato usam, então o laço de recrutamento
+varria uma rua inteira e rejeitava todos. A vítima era detectada, a janela
+abria, ninguém aparecia (§6.3quater).
+
+O requisito é deixar os covardes em paz, e quem diz quem é covarde é a coluna
+*Default decision maker* do próprio jogo. Ir além dela não é rigor: é remover a
+multidão que o mod existe para levantar. O que sobra de subjetividade está num
+teste só, com comentário no fonte, e é o `MAX_FEAR`.
 
 ### 5.3 O fim da limitação de missões
 
@@ -613,8 +620,54 @@ mecânica:
   verificador tratava `NOW = NOW - WAVE_TIME` como escrita pura e, com isso,
   declarava "limpo" exatamente o bug que o originou.
 
+### 6.3quater Defeitos que o segundo playtest revelou
+
+O mod passou a detectar a vítima e anunciar o recrutamento, e mesmo assim nenhum
+homem atacava. Dois filtros, cada um capaz de reprovar a rua inteira sozinho:
+
+1. **`IS_LINE_OF_SIGHT_CLEAR` estava com a flag de peds ligada.** O `06BD` toma
+   cinco flags — `buildings, cars, chars, objects, particles` — e o script
+   passava `1 0 1 0 0`. Com `chars = 1`, qualquer ped entre a testemunha e a
+   vítima quebrava o raio: numa multidão, que é exatamente quando este mod
+   dispara, isso reprovava praticamente todo mundo. O teste existe para que
+   ninguém reaja através de uma parede, então só `buildings` fica ligado
+   (`1 0 0 0 0`): um espectador, um carro estacionado ou uma lixeira não são
+   obstrução.
+2. **A blacklist de covardes excluía todos os civis masculinos.** O intervalo de
+   pedstats `14..25` cobria `STREET_GUY`, `SUIT_GUY`, `SENSIBLE_GUY`,
+   `GEEK_GUY`, `OLD_GUY` e `TOUGH_GUY` — ou seja, as linhas que os homens comuns
+   usam. Restavam gangues, criminosos, mendigos e `TOURIST`, e `TOURIST` o teste
+   de fear já derrubava. Num bairro sem gangue o conjunto de candidatos era
+   vazio por construção (§5.2). Substituído pelas duas linhas masculinas que o
+   jogo realmente marca como covardes dentro daquele intervalo, `SENSIBLE_GUY`
+   (16) e `GEEK_GUY` (17); `STEWARD`, `SHOPPER`, `OLDSHOPPER`, `SKATER` e
+   `COWARD` já eram testadas individualmente.
+
+Os dois defeitos tinham uma coisa em comum: **cada filtro parecia defensável
+lido isoladamente**, e o conjunto era vazio. Nenhum dos dois aparece no IR, e
+nenhum dos dois é alcançável pelas auditorias existentes — elas verificam
+variáveis locais e textos, não semântica de filtro. Por isso a janela de
+recrutamento ganhou uma linha de diagnóstico ao terminar:
+
+```
+MENREACT WINDOW OVER, DEFENDERS: 0
+```
+
+Sem ela, "vítima detectada" e silêncio não se distinguem de "o script travou".
+Com ela, `0` diz que todos os candidatos reprovaram em algum filtro, e a ausência
+da linha diz que a janela foi interrompida antes (ela entrou num carro, o
+jogador entrou, começou uma missão).
+
 ### 6.4 O que continua sendo limitação
 
+* **`IS_CHAR_MALE` (`03A3`) é um teste de *ped type*, não de modelo.** Ele
+  devolve true quando o tipo não é `CIVFEMALE` nem `PROSTITUTE`, o que tem duas
+  consequências. A boa: nenhum homem é perdido — homens de gangue, criminosos e
+  mendigos passam. A ruim: uma mulher cujo tipo seja `GANG*`, `CRIMINAL` ou
+  `BUM` também passa, porque esses tipos são compartilhados pelos dois sexos e o
+  motor não expõe o sexo do modelo por opcode. Do lado da vítima o efeito é o
+  inverso e é desejável: só reage quando a mulher agredida é `CIVFEMALE` ou
+  `PROSTITUTE`.
 * **`DEFENDER_TIMEOUT` é absoluto, não por distância.** Um defensor desiste após
   45 s mesmo que o jogador continue perto. É o preço de não reintroduzir a
   perseguição permanente do original (B5); novas agressões recrutam de novo.
