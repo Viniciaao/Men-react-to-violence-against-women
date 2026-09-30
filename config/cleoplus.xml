@@ -1,0 +1,260 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+    CLEO+ opcode definitions for thelink2012/gta3sc.
+
+    gta3sc ships config/gtasa/cleo.xml, but that file stops at 0xB16 (BIT_SHL)
+    and therefore knows nothing about CLEO+.  This file is appended to the
+    configuration with
+
+        gta3sc src/MOBBNOBRAVEZA.sc - -config=gtasa - -guesser - -cs \
+               - -add-config=config/cleoplus.xml ...
+
+    (build.sh already does that; see ./build.sh -h).
+
+    ------------------------------------------------------------------------
+    Provenance
+    ------------------------------------------------------------------------
+    CLEO+ itself ships a gta3sc file, "(for developers)/gta3script/cleo.xml"
+    (JuniorDjjr/CLEOPlus, branch main, commit d04732be7251).  Every command
+    below was compared against it and is byte-for-byte equivalent - same ID,
+    same argument order, same Type/Entity/Out/Enum attributes - so this file is
+    a verified excerpt, not a guess.  Argument directions and counts were
+    additionally cross-checked against the Sanny Builder Library
+    (sa/sa.json, extension "CLEO+") and against the CLEO+ implementations
+    themselves (docs/COMPILER.md section 7).
+
+    The <Enum Name="PEDSTAT"> block is copied verbatim from that official file,
+    which is where the PEDSTAT_* names the script uses come from.
+
+    ------------------------------------------------------------------------
+    Why the official file is NOT used directly
+    ------------------------------------------------------------------------
+    It cannot be passed to - -add-config as it is.  - -add-config appends, and
+    the official file is a 439-command superset of gta3sc's own cleo.xml, so
+    119 IDs would be declared twice and two *vanilla San Andreas* opcodes would
+    be silently redefined out from under the compiler:
+
+        0x485  gta3sc: IS_PC_VERSION        CLEO+: RETURN_TRUE
+        0x59A  gta3sc: IS_AUSTRALIAN_GAME   CLEO+: RETURN_FALSE
+
+    Its <Enum Name="BONE"> also disagrees with gta3sc's constants.xml on two
+    values (BONE_L_BREAST 46 vs 302, BONE_R_BREAST 45 vs 301), and enums are
+    merged by name, so CLEO+'s numbers would win.
+
+    The official file is meant to *replace* config/gtasa/cleo.xml in a Sanny
+    Builder installation, not to be added on top of gta3sc's.  Hence this
+    excerpt: only the ten commands this mod actually calls, the three
+    GTA3script aliases below, and the one enum it needs.
+
+    Note the difference between those two 0x485/0x59A entries and the ones this
+    file adds on purpose.  Here they are declared as *aliases*, with gta3sc's own
+    IS_PC_VERSION / IS_AUSTRALIAN_GAME left in place and still usable; a script
+    only gets RETURN_TRUE when it asks for RETURN_TRUE by name.  Loaded from the
+    official file they arrive as part of a 439-command block that also redeclares
+    every other CLEO opcode, which is not something to do by accident.
+
+    ------------------------------------------------------------------------
+    Format notes
+    ------------------------------------------------------------------------
+    Argument types are limited to what gta3sc understands (INT FLOAT PARAM LABEL
+    CONSTANT TEXT_LABEL TEXT_LABEL16 TEXT_LABEL32 STRING): Sanny Builder Library
+    types such as "KeyCode", "PedStat" and "PedState" are plain integers in the
+    compiled script, so they appear here as INT, optionally with Enum= to bind
+    the official names.
+
+    Conditions need no extra markup: gta3sc decides "is this a condition?" from
+    the position in the source (inside IF / IF NOT), not from the XML.  An
+    inverted use is encoded by the compiler as opcode | 0x8000.
+
+    Every opcode below is a CLEO+ extension, so the compiled script REQUIRES
+    CLEO+ in game (CLEO 4 alone will fail to load it with an unknown-opcode
+    error).
+--><GTA3Script>
+  <Constants>
+
+    <!-- data/pedstats.dat rows, 0-based, in file order.  Copied verbatim from
+         the official CLEO+ gta3sc file.  Global="true" is what makes the names
+         usable anywhere in a script instead of only in the argument that binds
+         the enum - and, conversely, what makes a script's own
+         "CONST_INT PEDSTAT_COWARD 42" fail with "user constant exists already
+         as a string constant". -->
+    <Enum Name="PEDSTAT" Global="true">
+    <Constant Name="PEDSTAT_PLAYER"/>
+    <Constant Name="PEDSTAT_COP"/>
+    <Constant Name="PEDSTAT_MEDIC"/>
+    <Constant Name="PEDSTAT_FIREMAN"/>
+    <Constant Name="PEDSTAT_GANG1"/>
+    <Constant Name="PEDSTAT_GANG2"/>
+    <Constant Name="PEDSTAT_GANG3"/>
+    <Constant Name="PEDSTAT_GANG4"/>
+    <Constant Name="PEDSTAT_GANG5"/>
+    <Constant Name="PEDSTAT_GANG6"/>
+    <Constant Name="PEDSTAT_GANG7"/>
+    <Constant Name="PEDSTAT_GANG8"/>
+    <Constant Name="PEDSTAT_GANG9"/>
+    <Constant Name="PEDSTAT_GANG10"/>
+    <Constant Name="PEDSTAT_STREET_GUY"/>
+    <Constant Name="PEDSTAT_SUIT_GUY"/>
+    <Constant Name="PEDSTAT_SENSIBLE_GUY"/>
+    <Constant Name="PEDSTAT_GEEK_GUY"/>
+    <Constant Name="PEDSTAT_OLD_GUY"/>
+    <Constant Name="PEDSTAT_TOUGH_GUY"/>
+    <Constant Name="PEDSTAT_STREET_GIRL"/>
+    <Constant Name="PEDSTAT_SUIT_GIRL"/>
+    <Constant Name="PEDSTAT_SENSIBLE_GIRL"/>
+    <Constant Name="PEDSTAT_GEEK_GIRL"/>
+    <Constant Name="PEDSTAT_OLD_GIRL"/>
+    <Constant Name="PEDSTAT_TOUGH_GIRL"/>
+    <Constant Name="PEDSTAT_TRAMP_MALE"/>
+    <Constant Name="PEDSTAT_TRAMP_FEMALE"/>
+    <Constant Name="PEDSTAT_TOURIST"/>
+    <Constant Name="PEDSTAT_PROSTITUTE"/>
+    <Constant Name="PEDSTAT_CRIMINAL"/>
+    <Constant Name="PEDSTAT_BUSKER"/>
+    <Constant Name="PEDSTAT_TAXIDRIVER"/>
+    <Constant Name="PEDSTAT_PSYCHO"/>
+    <Constant Name="PEDSTAT_STEWARD"/>
+    <Constant Name="PEDSTAT_SPORTSFAN"/>
+    <Constant Name="PEDSTAT_SHOPPER"/>
+    <Constant Name="PEDSTAT_OLDSHOPPER"/>
+    <Constant Name="PEDSTAT_BEACH_GUY"/>
+    <Constant Name="PEDSTAT_BEACH_GIRL"/>
+    <Constant Name="PEDSTAT_SKATER"/>
+    <Constant Name="PEDSTAT_STD_MISSION"/>
+    <Constant Name="PEDSTAT_COWARD"/>
+    </Enum>
+  </Constants>
+
+  <Commands>
+
+    <!-- ====================================================== GTA3script aliases
+
+    Junior_Djjr's "[GTA3script] WHILE TRUE, RETURN_TRUE e RETURN_FALSE"
+    (forum.mixmods.com.br, topic 179) re-introduces three names that GTA III and
+    Vice City had and San Andreas lost.  They are not new opcodes, only aliases
+    of two SA opcodes that always answer the same thing on PC:
+
+        0x485  IS_PC_VERSION        ->  TRUE / RETURN_TRUE    (always true)
+        0x59A  IS_AUSTRALIAN_GAME   ->  RETURN_FALSE          (always false)
+
+    Both original names keep working, so old scripts still compile.  gta3sc
+    accepts several <Command> entries sharing one ID - they become alternators -
+    which is what makes the aliases possible from an --add-config file.
+
+    They are conditions, and that is the whole point: RETURN_TRUE / RETURN_FALSE
+    set the script's compare flag and then RETURN hands it to the caller, which
+    reads it with "IF GOSUB Label".  This is how a boolean subroutine is written
+    in GTA3script, and the coward filter below uses it. -->
+    <Command ID="0x485" Name="TRUE"/>
+    <Command ID="0x485" Name="RETURN_TRUE"/>
+    <Command ID="0x59a" Name="RETURN_FALSE"/>
+
+    <!-- ============================================================ game state -->
+
+    <!-- bool IS_ON_MISSION()
+         True while the "on mission" global set by 0180 is non-zero.
+         Plain CLEO scripts cannot read $ONMISSION (gta3sc has no DIM_VAR and
+         custom scripts get their own local pool), so this is the only way to
+         know that a mission is running. -->
+    <Command ID="0xe1d" Name="IS_ON_MISSION"/>
+
+    <!-- bool IS_ON_CUTSCENE()  - true while a cutscene is active (02E7) -->
+    <Command ID="0xe25" Name="IS_ON_CUTSCENE"/>
+
+    <!-- bool IS_ON_SCRIPTED_CUTSCENE()
+         True while a scripted mission cutscene plays (widescreen borders on). -->
+    <Command ID="0xeb7" Name="IS_ON_SCRIPTED_CUTSCENE"/>
+
+    <!-- ============================================================ input -->
+
+    <!-- bool IS_KEY_JUST_PRESSED(KeyCode keyCode)
+         Edge triggered: only true on the frame the key went down, so a hotkey
+         needs no software debounce and cannot repeat while the key is held. -->
+    <Command ID="0xe3d" Name="IS_KEY_JUST_PRESSED">
+      <Args>
+        <Arg Type="INT" Enum="WIN32_VK"/>
+      </Args>
+    </Command>
+
+    <!-- ============================================================ ped queries -->
+
+    <!-- bool IS_CHAR_SCRIPT_CONTROLLED(Char self)
+         CLEO+ implements this as "ped->m_nCreatedBy == 2" (CPed +0x484), which
+         is the same state its own MARK_CHAR_AS_NEEDED writes.  So it is true for
+         a ped that a script created or adopted - mission peds and peds spawned
+         by other CLEO mods - and false for an ordinary random world ped.  Used
+         here to leave script-owned peds strictly alone.  (Whatever is left of
+         the mission ped types is caught separately by GET_PED_TYPE.) -->
+    <Command ID="0xe0a" Name="IS_CHAR_SCRIPT_CONTROLLED">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+      </Args>
+    </Command>
+
+    <!-- bool IS_CHAR_FIGHTING(Char self)
+         True while the ped is already in a fight.  Such a ped is already being
+         driven by the game's own combat AI, so recruiting it would only
+         overwrite a decision the game made by itself. -->
+    <Command ID="0xe47" Name="IS_CHAR_FIGHTING">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+      </Args>
+    </Command>
+
+    <!-- int GET_CHAR_FEAR(Char self) -> int fear
+         The Fear column of data/pedstats.dat (0..100, 100 = scared of
+         everything).  This is the number the game itself uses to decide how
+         quickly a ped runs away, which makes it the right "is he a coward?"
+         test.  Vanilla values, for reference:
+             PSYCHO 0 | COP 10 | FIREMAN 10 | TAXIDRIVER 16 | GANG1-9 20
+             TOUGH_GUY 30 | SUIT_GUY 35 | CRIMINAL 30 | SHOPPER 30
+             OLD_GUY 40 | PROSTITUTE 40 | SPORTSFAN 40 | STEWARD 40
+             STREET_GUY 45 | OLDSHOPPER 45 | BEACH_GUY 52 | GEEK_GUY 56
+             TRAMP_MALE 60 | SENSIBLE_GUY 65 | COWARD 65 | TOURIST 100 -->
+    <Command ID="0xefa" Name="GET_CHAR_FEAR">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+        <Arg Type="INT" Out="true"/>
+      </Args>
+    </Command>
+
+    <!-- PedStat GET_CHAR_STAT_ID(Char self) -> int pedStat
+         The pedstat row of the ped, i.e. its index in data/pedstats.dat
+         (STAT_PLAYER 0 ... STAT_STD_MISSION 41, STAT_COWARD 42).  Every SA
+         ped type maps to exactly one row, so this identifies the ped's
+         personality precisely - unlike GET_PED_TYPE, which only separates
+         civilian / cop / gang / mission. -->
+    <Command ID="0xeb1" Name="GET_CHAR_STAT_ID">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+        <Arg Type="INT" Enum="PEDSTAT" Out="true"/>
+      </Args>
+    </Command>
+
+    <!-- Char GET_CHAR_KILL_TARGET_CHAR(Char self) -> Char killTarget
+         The ped this character's TASK_KILL_CHAR_ON_FOOT was issued against
+         (0 when it has none).  Used to find out whether a defender is still
+         running *our* task before touching it again: if the game gave him
+         something else to do in the meantime, we do not clear it. -->
+    <Command ID="0xe44" Name="GET_CHAR_KILL_TARGET_CHAR">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+        <Arg Type="INT" Out="true" Entity="CHAR"/>
+      </Args>
+    </Command>
+
+    <!-- ============================================================ geometry -->
+
+    <!-- bool LOCATE_CHAR_DISTANCE_TO_CHAR(Char self, Char character, float radius)
+         3D distance test between two peds with a single radius argument,
+         instead of the six-argument LOCATE_CHAR_ANY_MEANS_CHAR_3D. -->
+    <Command ID="0xee4" Name="LOCATE_CHAR_DISTANCE_TO_CHAR">
+      <Args>
+        <Arg Type="INT" Entity="CHAR"/>
+        <Arg Type="INT" Entity="CHAR"/>
+        <Arg Type="FLOAT" Desc="Radius"/>
+      </Args>
+    </Command>
+
+  </Commands>
+</GTA3Script>
