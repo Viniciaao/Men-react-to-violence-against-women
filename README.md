@@ -115,7 +115,7 @@ edite e recompile com `./build.sh`.
 | `MAX_DEFENDERS` | `5` | **Teto** de defensores simultâneos (o original não tinha) |
 | `RECRUIT_WINDOW` | `2500` ms | Por quanto tempo se procura testemunhas |
 | `RECRUIT_STEP_DELAY` | `120` ms | Pausa entre dois recrutamentos (anti-turba) |
-| `DEFENDER_TIMEOUT` | `45000` ms | Quando o defensor desiste e volta a ser ped comum |
+| `DEFENDER_TIMEOUT` | `45000` ms | Quando o defensor desiste e volta a ser ped comum. Se ele **morre** ou o jogo o recicla, a vaga é liberada na hora — não espera os 45 s |
 | `MAX_FEAR` | `70` | Fear máximo aceitável (`GET_CHAR_FEAR`); `100` desliga o teste |
 | `PEDSTAT_*` | — | Linhas da `pedstats.dat` rejeitadas como covardes |
 | `WAVE_COOLDOWN` | `8000` ms | Intervalo mínimo entre duas reações |
@@ -301,6 +301,9 @@ MENREACT IDLE: A MISSION IS RUNNING            <- estado periódico
 MENREACT: VICTIM DETECTED, RECRUITING          <- evento
 MENREACT RECRUITED, DEFENDERS NOW: 3           <- evento
 MENREACT WINDOW OVER, DEFENDERS: 3             <- evento: a janela terminou
+MENREACT: DEFENDER DIED, SLOT FREED            <- evento: ele morreu defendendo
+MENREACT: DEFENDER GONE, SLOT FREED            <- evento: o jogo reciclou o ped
+MENREACT: DEFENDER TIMED OUT, RELEASED         <- evento: deram os 45 s
 MENREACT: MOB FULL, WITNESS LEFT ALONE         <- evento
 MENREACT: DEFENDER TIMED OUT, RELEASED         <- evento
 MENREACT RELEASED DEFENDERS: 3                 <- evento

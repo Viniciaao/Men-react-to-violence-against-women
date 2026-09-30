@@ -524,6 +524,12 @@ Duas decisões de custo deliberadas:
    cima e só são liberados em ordem, slot 0 vazio implica lista vazia — um
    comparador resolve.
 
+   > **Este item estava errado e foi desfeito no §6.3quinquies.** Os slots são
+   > preenchidos do índice 0 para cima, mas **não** são liberados em ordem: cada
+   > um tem o seu próprio relógio. A premissa "slot 0 vazio implica lista vazia"
+   > é falsa, e o *fast path* que ela justificava era o defeito mais grave dos
+   > três encontrados nesta rodada.
+
 ### 6.3bis Defeitos encontrados **nesta** rodada (sempre-ativo + ScrDebug)
 
 Três, todos introduzidos pela reescrita desta rodada e todos pegos antes de
@@ -657,6 +663,48 @@ Sem ela, "vítima detectada" e silêncio não se distinguem de "o script travou"
 Com ela, `0` diz que todos os candidatos reprovaram em algum filtro, e a ausência
 da linha diz que a janela foi interrompida antes (ela entrou num carro, o
 jogador entrou, começou uma missão).
+
+### 6.3quinquies Defeitos que o terceiro playtest revelou
+
+O mod funcionou: detectou, recrutou, os homens atacaram. O teste também mostrou
+um defensor morto continuando na contagem até o `DEFENDER_TIMEOUT` de 45 s — o
+que levou a duas descobertas, a segunda bem pior do que a relatada.
+
+1. **Defensor morto ou desaparecido continuava listado.** `ReleaseOneDefender`
+   já tratava um cadáver corretamente — não há task para tirar de um morto, e o
+   jogo é dono dele daqui em diante — mas quem decidia *quando* liberar o slot
+   era só o relógio. Um defensor morto ocupava a vaga por até 45 s, aparecia na
+   contagem do debug e impedia o recrutamento de outro homem no lugar dele.
+   Agora `ReleaseExpiredDefenders` testa três motivos, nesta ordem: o handle não
+   é mais um ped (o sistema de população o reciclou quando o jogador se afastou),
+   o ped morreu, ou estourou o tempo. O laço de recrutamento passa a ver morto e
+   desaparecido como vaga livre também, porque `ReleaseExpiredDefenders` não roda
+   durante a janela de recrutamento.
+2. **O *fast path* das duas rotinas de liberação era falso — e travava as
+   liberações para sempre.** Ambas começavam com
+   `IF DEFENDER_HANDLE[0] = SLOT_EMPTY: RETURN`, justificadas no item 4 do §6.3
+   pela premissa de que os slots são liberados em ordem. Não são: cada slot tem o
+   seu `DEFENDER_SINCE` e o seu prazo, e nada compacta a lista. O primeiro
+   recrutado é o primeiro a expirar, então o cenário comum era este:
+
+   ```
+   t+0      recruta 3 defensores            -> slots 0, 1, 2
+   t+45.0s  slot 0 expira e é liberado      -> slots _, 1, 2 ocupados
+   t+45.2s  ReleaseExpiredDefenders: slot 0 vazio -> RETURN
+            (e o mesmo em ReleaseAllDefenders, para sempre)
+   ```
+
+   A partir daí os slots 1 e 2 nunca mais eram liberados por nenhuma das duas
+   rotinas: os dois homens ficavam com `TASK_KILL_CHAR_ON_FOOT` **sem prazo**,
+   perseguindo o jogador inclusive depois de ele entrar num carro ou começar uma
+   missão — que é exatamente o `ReleaseAllDefenders` deixando de funcionar. É o
+   bug B5 do original de 2011 (perseguição permanente), reintroduzido por uma
+   otimização. Os dois *fast paths* foram removidos; o custo é de cinco
+   comparações por tick, e o que dá o ritmo do laço é o `WAIT SCAN_INTERVAL`.
+
+   Só havia como notar isso lendo o que as rotinas **não** faziam: o IR está
+   correto, as auditorias de variáveis locais e de texto estão limpas, e o
+   comportamento aparece só depois de 45 s de jogo com três ou mais defensores.
 
 ### 6.4 O que continua sendo limitação
 

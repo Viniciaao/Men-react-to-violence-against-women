@@ -831,9 +831,22 @@ ENDIF
 
 // --- pick a free slot: empty, or expired -----------------------------------
 // ROLL (25@) doubles as the loop counter, CURSOR (24@) as the slot found.
+// A slot is reusable when it is empty, when its man is no longer a ped, when he
+// died, or when he has had long enough.  The dead and the vanished are counted
+// here as well as in ReleaseExpiredDefenders because that routine does not run
+// during a recruit window - without this a corpse would block his slot for the
+// whole 2.5 s, and for the rest of DEFENDER_TIMEOUT if no wave came after.
 CURSOR = NO_SLOT
 REPEAT MAX_DEFENDERS ROLL
     IF DEFENDER_HANDLE[ROLL] = SLOT_EMPTY
+        CURSOR = ROLL
+        BREAK
+    ENDIF
+    IF NOT DOES_CHAR_EXIST DEFENDER_HANDLE[ROLL]
+        CURSOR = ROLL
+        BREAK
+    ENDIF
+    IF IS_CHAR_DEAD DEFENDER_HANDLE[ROLL]
         CURSOR = ROLL
         BREAK
     ENDIF
@@ -910,17 +923,48 @@ GOTO RECRUIT_WINDOW_LOOP
 // for the wave cooldown as soon as this returns.
 //----------------------------------------------------------------------------
 ReleaseExpiredDefenders:
-// Fast path.  DEFENDER_HANDLE[0] is local 4@: gta3sc allocates locals in
-// declaration order from 0@, and 0@..3@ are the reserved CLEO_ARGS, so the map
-// in the header is literal and the five slots are 4@..8@.  Slots are filled from
-// index 0 upwards and only ever freed in order, so an empty slot 0 means an
-// empty list - and that is the state this routine is called in on almost every
-// tick of the main loop.
-IF DEFENDER_HANDLE[0] = SLOT_EMPTY
-    RETURN
-ENDIF
+// There is no "slot 0 empty, so the list is empty" shortcut here, and putting
+// one back would be a bug: slots are filled from index 0 upwards but each one is
+// freed on its own clock, so the first defender recruited is also the first to
+// expire - and from that moment on slot 0 is empty while the others are still
+// occupied.  A routine that stopped at an empty slot 0 would stop releasing
+// anybody, forever, which is the 2011 original's permanent-pursuit bug wearing a
+// different hat.  The five comparisons this costs per tick are the cheap part of
+// the loop; WAIT SCAN_INTERVAL is what actually paces it.
+//
+// Three reasons to let a slot go, tested in this order, each one leaving the
+// slot empty so the tests below skip it:
+//
+//   gone    - the handle is no longer a ped at all.  The population system
+//             recycled him when the player moved away.  Nothing to release,
+//             nothing to remember.
+//   dead    - he died defending her.  A corpse has no task to take away and the
+//             game owns it from here on, so listing him any longer only meant
+//             counting a dead man among the defenders and holding his slot for
+//             the rest of DEFENDER_TIMEOUT.
+//   expired - alive and still ours, but he has had long enough.  The only case
+//             with anything to undo, and ReleaseOneDefender undoes it only while
+//             the task is still the one this script gave him.
 GET_GAME_TIMER NOW
 REPEAT MAX_DEFENDERS CURSOR
+    IF DEFENDER_HANDLE[CURSOR] > SLOT_EMPTY
+        IF NOT DOES_CHAR_EXIST DEFENDER_HANDLE[CURSOR]
+            DEFENDER_HANDLE[CURSOR] = SLOT_EMPTY
+            GOSUB DebugGate
+            IF DBG_COUNT = 1
+                WRITE_DEBUG "MenReact: defender gone, slot freed"
+            ENDIF
+        ENDIF
+    ENDIF
+    IF DEFENDER_HANDLE[CURSOR] > SLOT_EMPTY
+        IF IS_CHAR_DEAD DEFENDER_HANDLE[CURSOR]
+            DEFENDER_HANDLE[CURSOR] = SLOT_EMPTY
+            GOSUB DebugGate
+            IF DBG_COUNT = 1
+                WRITE_DEBUG "MenReact: defender died, slot freed"
+            ENDIF
+        ENDIF
+    ENDIF
     IF DEFENDER_HANDLE[CURSOR] > SLOT_EMPTY
         ROLL = NOW - DEFENDER_SINCE[CURSOR]
         IF ROLL > DEFENDER_TIMEOUT
@@ -951,9 +995,12 @@ RETURN
 // caller invokes this at a point where DEFENDER (29@) is dead.
 //----------------------------------------------------------------------------
 ReleaseAllDefenders:
-IF DEFENDER_HANDLE[0] = SLOT_EMPTY
-    RETURN                          // same fast path, and the common case
-ENDIF
+// No shortcut on slot 0, for the same reason as ReleaseExpiredDefenders: it can
+// be empty while the slots above it are still holding men, and this routine is
+// the last line of defence - it is what drops everybody when the player gets
+// into a car, when a mission or a cutscene starts, and when he dies or is
+// busted.  Skipping it because slot 0 happened to be free would leave those men
+// chasing him through the mission.
 DBG_COUNT = 0
 REPEAT MAX_DEFENDERS CURSOR
     IF DEFENDER_HANDLE[CURSOR] > SLOT_EMPTY
